@@ -19,8 +19,6 @@ func TestReasonFromError(t *testing.T) {
 	}{
 		{name: "not found", inErr: model.ErrNotFound, expectedReason: ReasonNotFound, expectedKnown: true},
 		{name: "invalid argument", inErr: model.ErrInvalidArgument, expectedReason: ReasonInvalidArgument, expectedKnown: true},
-		{name: "unique violation", inErr: model.ErrUniqueViolation, expectedReason: ReasonUniqueViolation, expectedKnown: true},
-		{name: "revision mismatch", inErr: model.ErrRevisionMismatch, expectedReason: ReasonRevisionMismatch, expectedKnown: true},
 		{name: "unknown", inErr: errors.New("unknown"), expectedReason: "", expectedKnown: false},
 	}
 
@@ -50,8 +48,6 @@ func TestHTTPStatusFromError(t *testing.T) {
 	}{
 		{name: "not found", inErr: model.ErrNotFound, expectedStatus: http.StatusNotFound},
 		{name: "invalid argument", inErr: model.ErrInvalidArgument, expectedStatus: http.StatusBadRequest},
-		{name: "unique violation", inErr: model.ErrUniqueViolation, expectedStatus: http.StatusConflict},
-		{name: "revision mismatch", inErr: model.ErrRevisionMismatch, expectedStatus: http.StatusPreconditionFailed},
 		{name: "unknown", inErr: errors.New("unknown"), expectedStatus: http.StatusInternalServerError},
 	}
 

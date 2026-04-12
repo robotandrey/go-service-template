@@ -1,208 +1,188 @@
 LOCAL_BIN ?= $(CURDIR)/bin
-GO ?= go
-GO_PROXY ?= https://proxy.golang.org,direct
-GOLANGCI_LINT_VERSION ?= v1.64.8
-BUF_VERSION ?= v1.32.0
-PROTOC_GEN_GO_VERSION ?= v1.34.2
-PROTOC_GEN_GO_GRPC_VERSION ?= v1.5.1
-MOCKGEN_VERSION ?= v1.6.0
-{% if pg_enabled %}
-GOOSE_VERSION ?= v3.23.0
+GO        ?= go
+
+PB_BASE_DIR  ?= $(CURDIR)/internal/pb/{{ module_path }}
+OPENAPI_DIR  ?= $(PB_BASE_DIR)/openapi
+OPENAPI_FILE ?= $(OPENAPI_DIR)/swagger.json
+{% if grpc_enabled %}
+PROTO_OPENAPI_SOURCE ?= $(PB_BASE_DIR)/api/{{ service_name }}/service.swagger.json
 {% endif %}
 
+# Tool versions
+GOLANGCI_LINT_VERSION ?= v1.64.8
+BUF_VERSION           ?= v1.32.0
+MOCKGEN_VERSION       ?= v1.6.0
+{% if grpc_enabled %}
+PROTOC_GEN_GO_VERSION           ?= v1.34.2
+PROTOC_GEN_GO_GRPC_VERSION      ?= v1.5.1
+PROTOC_GEN_GRPC_GATEWAY_VERSION ?= v2.22.0
+PROTOC_GEN_OPENAPIV2_VERSION    ?= v2.22.0
+{% endif %}
+{% if pg_enabled %}
+GOOSE_VERSION ?= v3.23.0
+LOCAL_PG_DSN ?= postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+{% endif %}
+
+# Tool paths
 GOLANGCI_LINT := $(LOCAL_BIN)/golangci-lint
-BUF := $(LOCAL_BIN)/buf
-PROTOC_GEN_GO := $(LOCAL_BIN)/protoc-gen-go
-PROTOC_GEN_GO_GRPC := $(LOCAL_BIN)/protoc-gen-go-grpc
-MOCKGEN := $(LOCAL_BIN)/mockgen
+BUF           := $(LOCAL_BIN)/buf
+MOCKGEN       := $(LOCAL_BIN)/mockgen
+{% if grpc_enabled %}
+PROTOC_GEN_GO           := $(LOCAL_BIN)/protoc-gen-go
+PROTOC_GEN_GO_GRPC      := $(LOCAL_BIN)/protoc-gen-go-grpc
+PROTOC_GEN_GRPC_GATEWAY := $(LOCAL_BIN)/protoc-gen-grpc-gateway
+PROTOC_GEN_OPENAPIV2    := $(LOCAL_BIN)/protoc-gen-openapiv2
+{% endif %}
 {% if pg_enabled %}
 GOOSE := $(LOCAL_BIN)/goose
 {% endif %}
 
-HTTP_ENABLED ?= {{ "true" if http_enabled else "false" }}
-GRPC_ENABLED ?= {{ "true" if grpc_enabled else "false" }}
-HTTP_PORT ?= 80
-GRPC_PORT ?= 82
+.PHONY: run test test-integration lint format format-check build generate mocks check \
+	check-system-deps deps install-golangci-lint install-mockgen \
+	install-buf install-protoc-gen-go install-protoc-gen-go-grpc install-protoc-gen-grpc-gateway install-protoc-gen-openapiv2 \
+	install-goose migrate-up migrate-down up down logs
 
-{% if pg_enabled %}
-LOCAL_PG_DSN ?= postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+run: check-system-deps
+	$(GO) run ./cmd/{{ service_name }}
+
+test: check-system-deps
+	$(GO) test ./... -race -count=1
+
+test-integration: check-system-deps
+	$(GO) test ./... -count=1 -tags=integration
+
+build: check-system-deps
+	$(GO) build ./...
+
+{% if grpc_enabled %}
+generate: check-system-deps install-buf install-protoc-gen-go install-protoc-gen-go-grpc install-protoc-gen-grpc-gateway install-protoc-gen-openapiv2
+{% else %}
+generate: check-system-deps
 {% endif %}
+	@mkdir -p "$(OPENAPI_DIR)"
+{% if grpc_enabled %}
+	PATH="$(LOCAL_BIN):$$PATH" $(BUF) dep update
+	PATH="$(LOCAL_BIN):$$PATH" $(BUF) generate
+	@test -f "$(PROTO_OPENAPI_SOURCE)" || { echo "missing generated swagger: $(PROTO_OPENAPI_SOURCE)"; exit 1; }
+	@cp "$(PROTO_OPENAPI_SOURCE)" "$(OPENAPI_FILE)"
+{% else %}
+	@test -f .deploy/openapi/http.swagger.json || { echo ".deploy/openapi/http.swagger.json not found"; exit 1; }
+	@cp .deploy/openapi/http.swagger.json "$(OPENAPI_FILE)"
+{% endif %}
+	$(GO) mod tidy
 
-.PHONY: preflight check-system-deps ensure-tools install-golangci-lint install-buf install-protoc-gen-go install-protoc-gen-go-grpc install-mockgen deps generate ensure-generated format format-check lint test test-integration build mocks check run{% if pg_enabled %} install-goose migrate-up migrate-down{% endif %}{% if docker_enabled or pg_enabled or kafka_enabled %} up down logs{% endif %}
+mocks: check-system-deps install-mockgen
+	@mkdir -p test/mock/internal/app/ping
+	PATH="$(LOCAL_BIN):$$PATH" $(MOCKGEN) \
+		-source internal/app/ping/service.go \
+		-destination test/mock/internal/app/ping/service_mock.go \
+		-package pingmock
+	$(GO) mod tidy
+
+lint: check-system-deps install-golangci-lint
+	$(GOLANGCI_LINT) run ./...
+
+format:
+	@files=$$(find . -type f -name '*.go' -not -path './vendor/*' -not -path './bin/*' -not -path './internal/pb/*' -not -path './test/mock/*'); \
+	if [ -n "$$files" ]; then gofmt -w $$files; fi
+
+format-check:
+	@files=$$(find . -type f -name '*.go' -not -path './vendor/*' -not -path './bin/*' -not -path './internal/pb/*' -not -path './test/mock/*'); \
+	if [ -z "$$files" ]; then exit 0; fi; \
+	unformatted=$$(gofmt -l $$files); \
+	if [ -n "$$unformatted" ]; then \
+		echo "Unformatted files:"; echo "$$unformatted"; echo "Run: make format"; exit 1; \
+	fi
+
+check: format-check lint test build
 
 check-system-deps:
-	@command -v "$(GO)" >/dev/null 2>&1 || { \
-		echo "Error: go is required. See README prerequisites."; \
-		exit 1; \
-	}
-	@command -v make >/dev/null 2>&1 || { \
-		echo "Error: make is required. See README prerequisites."; \
-		exit 1; \
-	}
+	@command -v "$(GO)" >/dev/null 2>&1 || { echo "go is required"; exit 1; }
+	@command -v make >/dev/null 2>&1 || { echo "make is required"; exit 1; }
 
-ensure-tools: install-golangci-lint{% if grpc_enabled %} install-buf install-protoc-gen-go install-protoc-gen-go-grpc{% endif %} install-mockgen{% if pg_enabled %} install-goose{% endif %}
+deps: check-system-deps
+	$(GO) mod download
 
 install-golangci-lint:
 	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(GOLANGCI_LINT)" ]; then \
-		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
-	fi
-
-install-buf:
-	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(BUF)" ]; then \
-		echo "Installing buf $(BUF_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION); \
-	fi
-
-install-protoc-gen-go:
-	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(PROTOC_GEN_GO)" ]; then \
-		echo "Installing protoc-gen-go $(PROTOC_GEN_GO_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION); \
-	fi
-
-install-protoc-gen-go-grpc:
-	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(PROTOC_GEN_GO_GRPC)" ]; then \
-		echo "Installing protoc-gen-go-grpc $(PROTOC_GEN_GO_GRPC_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION); \
-	fi
+	@[ -x "$(GOLANGCI_LINT)" ] || { \
+		echo "Installing golangci-lint $(GOLANGCI_LINT_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/golangci/golangci-lint/cmd/golangci-lint@$(GOLANGCI_LINT_VERSION); \
+	}
 
 install-mockgen:
 	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(MOCKGEN)" ]; then \
-		echo "Installing mockgen $(MOCKGEN_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install github.com/golang/mock/mockgen@$(MOCKGEN_VERSION); \
-	fi
+	@[ -x "$(MOCKGEN)" ] || { \
+		echo "Installing mockgen $(MOCKGEN_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/golang/mock/mockgen@$(MOCKGEN_VERSION); \
+	}
+
+{% if grpc_enabled %}
+install-buf:
+	@mkdir -p "$(LOCAL_BIN)"
+	@[ -x "$(BUF)" ] || { \
+		echo "Installing buf $(BUF_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/bufbuild/buf/cmd/buf@$(BUF_VERSION); \
+	}
+
+install-protoc-gen-go:
+	@mkdir -p "$(LOCAL_BIN)"
+	@[ -x "$(PROTOC_GEN_GO)" ] || { \
+		echo "Installing protoc-gen-go $(PROTOC_GEN_GO_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install google.golang.org/protobuf/cmd/protoc-gen-go@$(PROTOC_GEN_GO_VERSION); \
+	}
+
+install-protoc-gen-go-grpc:
+	@mkdir -p "$(LOCAL_BIN)"
+	@[ -x "$(PROTOC_GEN_GO_GRPC)" ] || { \
+		echo "Installing protoc-gen-go-grpc $(PROTOC_GEN_GO_GRPC_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install google.golang.org/grpc/cmd/protoc-gen-go-grpc@$(PROTOC_GEN_GO_GRPC_VERSION); \
+	}
+
+install-protoc-gen-grpc-gateway:
+	@mkdir -p "$(LOCAL_BIN)"
+	@[ -x "$(PROTOC_GEN_GRPC_GATEWAY)" ] || { \
+		echo "Installing protoc-gen-grpc-gateway $(PROTOC_GEN_GRPC_GATEWAY_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-grpc-gateway@$(PROTOC_GEN_GRPC_GATEWAY_VERSION); \
+	}
+
+install-protoc-gen-openapiv2:
+	@mkdir -p "$(LOCAL_BIN)"
+	@[ -x "$(PROTOC_GEN_OPENAPIV2)" ] || { \
+		echo "Installing protoc-gen-openapiv2 $(PROTOC_GEN_OPENAPIV2_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/grpc-ecosystem/grpc-gateway/v2/protoc-gen-openapiv2@$(PROTOC_GEN_OPENAPIV2_VERSION); \
+	}
+{% endif %}
 
 {% if pg_enabled %}
 install-goose:
 	@mkdir -p "$(LOCAL_BIN)"
-	@if [ ! -x "$(GOOSE)" ]; then \
-		echo "Installing goose $(GOOSE_VERSION) to $(LOCAL_BIN)..."; \
-		GOBIN="$(LOCAL_BIN)" GOPROXY="$(GO_PROXY)" "$(GO)" install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION); \
-	fi
-{% endif %}
+	@[ -x "$(GOOSE)" ] || { \
+		echo "Installing goose $(GOOSE_VERSION)..."; \
+		GOBIN="$(LOCAL_BIN)" $(GO) install github.com/pressly/goose/v3/cmd/goose@$(GOOSE_VERSION); \
+	}
 
-preflight: check-system-deps ensure-tools
-
-deps: preflight
-	@echo "Dependencies are ready."
-
-generate: preflight
-	GOPROXY="$(GO_PROXY)" $(GO) generate ./...
-{% if grpc_enabled %}
-	PATH="$(LOCAL_BIN):$$PATH" $(BUF) generate
-{% endif %}
-{% if pg_enabled %}
-	$(GOOSE) --version >/dev/null
-{% endif %}
-	GOPROXY="$(GO_PROXY)" $(GO) mod tidy
-
-ensure-generated: preflight
-{% if grpc_enabled %}
-	@if [ ! -f "api/{{ service_name }}/service.pb.go" ] || [ ! -f "api/{{ service_name }}/service_grpc.pb.go" ]; then \
-		echo "Generated gRPC files are missing, running make generate..."; \
-		$(MAKE) generate; \
-	fi
-{% endif %}
-	@if [ ! -f "go.sum" ]; then \
-		echo "go.sum is missing, running go mod tidy..."; \
-		GOPROXY="$(GO_PROXY)" $(GO) mod tidy; \
-	fi
-
-format:
-	@files="$$(find . -type f -name '*.go' -not -path './vendor/*' -not -path './bin/*')"; \
-	if [ -n "$$files" ]; then \
-		gofmt -w $$files; \
-	fi
-
-format-check:
-	@files="$$(find . -type f -name '*.go' -not -path './vendor/*' -not -path './bin/*')"; \
-	if [ -z "$$files" ]; then \
-		exit 0; \
-	fi; \
-	unformatted="$$(gofmt -l $$files)"; \
-	if [ -n "$$unformatted" ]; then \
-		echo "Unformatted Go files:"; \
-		echo "$$unformatted"; \
-		echo "Run 'make format'."; \
-		exit 1; \
-	fi
-
-lint: ensure-generated
-	$(GOLANGCI_LINT) run ./...
-
-test: ensure-generated
-	GOPROXY="$(GO_PROXY)" $(GO) test ./... -race -count=1
-
-test-integration: ensure-generated
-	GOPROXY="$(GO_PROXY)" $(GO) test ./... -count=1 -tags=integration
-
-build: ensure-generated
-	GOPROXY="$(GO_PROXY)" $(GO) build ./...
-
-mocks: preflight
-	@echo "Running go generate for mock directives (if present)..."
-	GOPROXY="$(GO_PROXY)" $(GO) generate ./...
-
-check:
-	$(MAKE) format-check
-	$(MAKE) lint
-	$(MAKE) test
-	$(MAKE) test-integration
-	$(MAKE) build
-
-run: ensure-generated
-	@run_http_port="$(HTTP_PORT)"; \
-	run_grpc_port="$(GRPC_PORT)"; \
-	if [ "$$(id -u)" -ne 0 ]; then \
-		if [ "$$run_http_port" -lt 1024 ] 2>/dev/null; then \
-			echo "HTTP_PORT=$$run_http_port requires root; using 8080 for local run."; \
-			run_http_port=8080; \
-		fi; \
-		if [ "$$run_grpc_port" -lt 1024 ] 2>/dev/null; then \
-			echo "GRPC_PORT=$$run_grpc_port requires root; using 8082 for local run."; \
-			run_grpc_port=8082; \
-		fi; \
-	fi; \
-	HTTP_ENABLED="$(HTTP_ENABLED)" \
-	GRPC_ENABLED="$(GRPC_ENABLED)" \
-	HTTP_PORT="$$run_http_port" \
-	GRPC_PORT="$$run_grpc_port" \
-	GOPROXY="$(GO_PROXY)" $(GO) run ./cmd/{{ service_name }}
-
-{% if pg_enabled %}
-migrate-up: ensure-generated
+migrate-up: check-system-deps install-goose
 	@dsn="$${PG_DSN:-$(LOCAL_PG_DSN)}"; \
 	$(GOOSE) -dir db/migrations postgres "$$dsn" up
 
-migrate-down: ensure-generated
+migrate-down: check-system-deps install-goose
 	@dsn="$${PG_DSN:-$(LOCAL_PG_DSN)}"; \
 	$(GOOSE) -dir db/migrations postgres "$$dsn" down
 {% endif %}
 
 {% if docker_enabled or pg_enabled or kafka_enabled %}
 up:
-	@command -v docker >/dev/null 2>&1 || { \
-		echo "Error: docker is required for make up."; \
-		exit 1; \
-	}
-	docker compose up -d --build
+	@command -v docker >/dev/null 2>&1 || { echo "docker is required"; exit 1; }
+	@test -f .deploy/docker/docker-compose.yml || { echo ".deploy/docker/docker-compose.yml not found"; exit 1; }
+	docker compose -f .deploy/docker/docker-compose.yml up -d --build
 
 down:
-	@command -v docker >/dev/null 2>&1 || { \
-		echo "Error: docker is required for make down."; \
-		exit 1; \
-	}
-	docker compose down -v
+	@command -v docker >/dev/null 2>&1 || { echo "docker is required"; exit 1; }
+	@test -f .deploy/docker/docker-compose.yml || { echo ".deploy/docker/docker-compose.yml not found"; exit 1; }
+	docker compose -f .deploy/docker/docker-compose.yml down -v
 
 logs:
-	@command -v docker >/dev/null 2>&1 || { \
-		echo "Error: docker is required for make logs."; \
-		exit 1; \
-	}
-	docker compose logs -f --tail=200
+	@test -f .deploy/docker/docker-compose.yml || { echo ".deploy/docker/docker-compose.yml not found"; exit 1; }
+	docker compose -f .deploy/docker/docker-compose.yml logs -f --tail=200
 {% endif %}

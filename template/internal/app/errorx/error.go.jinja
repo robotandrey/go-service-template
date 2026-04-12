@@ -8,10 +8,8 @@ import (
 )
 
 const (
-	ReasonNotFound         = "NOT_FOUND"
-	ReasonInvalidArgument  = "INVALID_ARGUMENT"
-	ReasonUniqueViolation  = "UNIQUE_VIOLATION"
-	ReasonRevisionMismatch = "REVISION_MISMATCH"
+	ReasonNotFound        = "NOT_FOUND"
+	ReasonInvalidArgument = "INVALID_ARGUMENT"
 )
 
 func ReasonFromError(err error) (string, bool) {
@@ -20,10 +18,6 @@ func ReasonFromError(err error) (string, bool) {
 		return ReasonNotFound, true
 	case errors.Is(err, model.ErrInvalidArgument):
 		return ReasonInvalidArgument, true
-	case errors.Is(err, model.ErrUniqueViolation):
-		return ReasonUniqueViolation, true
-	case errors.Is(err, model.ErrRevisionMismatch):
-		return ReasonRevisionMismatch, true
 	default:
 		return "", false
 	}
@@ -40,10 +34,6 @@ func HTTPStatusFromError(err error) int {
 		return http.StatusNotFound
 	case ReasonInvalidArgument:
 		return http.StatusBadRequest
-	case ReasonUniqueViolation:
-		return http.StatusConflict
-	case ReasonRevisionMismatch:
-		return http.StatusPreconditionFailed
 	default:
 		return http.StatusInternalServerError
 	}

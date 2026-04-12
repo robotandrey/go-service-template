@@ -1,0 +1,64 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "{{ service_name }}",
+    "version": "1.0.0"
+  },
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/healthz": {
+      "get": {
+        "summary": "Health check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/readyz": {
+      "get": {
+        "summary": "Readiness check",
+        "responses": {
+          "200": {
+            "description": "OK"
+          }
+        }
+      }
+    },
+    "/v1/ping": {
+      "get": {
+        "summary": "Ping",
+        "parameters": [
+          {
+            "name": "error",
+            "in": "query",
+            "required": false,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "schema": {
+              "$ref": "#/definitions/PingResponse"
+            }
+          },
+          "400": {"description": "Invalid argument"},
+          "404": {"description": "Not found"},
+          "500": {"description": "Internal server error"}
+        }
+      }
+    }
+  },
+  "definitions": {
+    "PingResponse": {
+      "type": "object",
+      "properties": {
+        "status": {"type": "string"},
+        "service": {"type": "string"}
+      }
+    }
+  }
+}

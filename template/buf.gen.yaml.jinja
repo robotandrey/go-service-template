@@ -1,10 +1,26 @@
 version: v1
+{% if grpc_enabled %}
 plugins:
   - plugin: go
     out: .
     opt:
-      - paths=source_relative
+      - paths=import
+      - module={{ module_path }}
   - plugin: go-grpc
     out: .
     opt:
-      - paths=source_relative
+      - paths=import
+      - module={{ module_path }}
+  - plugin: grpc-gateway
+    out: .
+    opt:
+      - paths=import
+      - module={{ module_path }}
+      - generate_unbound_methods=true
+  - plugin: openapiv2
+    out: internal/pb/{{ module_path }}
+    opt:
+      - generate_unbound_methods=true
+{% else %}
+plugins: []
+{% endif %}

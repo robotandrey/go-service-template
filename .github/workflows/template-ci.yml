@@ -41,6 +41,7 @@ jobs:
             http_enabled: "true"
             grpc_enabled: "true"
             extra_flags: "PG_ENABLED=true KAFKA_ENABLED=true KAFKA_PRODUCER_ENABLED=true KAFKA_CONSUMER_ENABLED=true DOCKER_ENABLED=true"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -65,15 +66,69 @@ jobs:
 
       - name: Build checks
         run: |
+          set -euo pipefail
           cd ${{ matrix.target_dir }}
+
           make generate
+          make mocks
           make lint
           make test
           make build
 
+          PB_BASE="internal/pb/${{ matrix.module_path }}"
+          test -d "$PB_BASE"
+          test -f "$PB_BASE/openapi/swagger.json"
+          python -m json.tool "$PB_BASE/openapi/swagger.json" >/dev/null
+          test -f test/mock/internal/app/ping/service_mock.go
+
+          if [ "${{ matrix.grpc_enabled }}" = "true" ]; then
+            test -d "$PB_BASE/api/${{ matrix.service_name }}"
+            test ! -d .deploy/openapi
+          else
+            test -f .deploy/openapi/http.swagger.json
+          fi
+
+      - name: Runtime docs smoke
+        run: |
+          set -euo pipefail
+          cd ${{ matrix.target_dir }}
+
+          make run > service.log 2>&1 &
+          pid=$!
+          trap 'kill "$pid" >/dev/null 2>&1 || true' EXIT
+
+          for _ in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:8081/swagger.json >/dev/null; then
+              break
+            fi
+            sleep 1
+          done
+
+          curl -fsS http://127.0.0.1:8081/docs >/dev/null
+          curl -fsS http://127.0.0.1:8081/swagger.json >/dev/null
+          curl -fsS http://127.0.0.1:8081/openapi/swagger.json >/dev/null
+
+          if [ "${{ matrix.grpc_enabled }}" = "true" ]; then
+            curl -fsS -X POST "http://127.0.0.1:8081/v1/ping" \
+              -H 'content-type: application/json' \
+              -d '{"forceError":""}' >/dev/null
+
+            timeout 2 bash -c '</dev/tcp/127.0.0.1/9090'
+          fi
+
+          if [ "${{ matrix.http_enabled }}" = "true" ]; then
+            curl -fsS http://127.0.0.1:8080/v1/ping >/dev/null
+          fi
+
+          if grep -q "Failed to extract ServerMetadata from context" service.log; then
+            echo "unexpected grpc-gateway metadata log noise"
+            cat service.log
+            exit 1
+          fi
+
       - name: Validate compose config when present
         run: |
           cd ${{ matrix.target_dir }}
-          if [ -f docker-compose.yml ]; then
-            docker compose config >/dev/null
+          if [ -f .deploy/docker/docker-compose.yml ]; then
+            docker compose -f .deploy/docker/docker-compose.yml config >/dev/null
           fi

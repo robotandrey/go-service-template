@@ -33,8 +33,6 @@ func TestServicePingForcedErrors(t *testing.T) {
 	}{
 		{name: "not found", forceError: model.ForceErrorNotFound, expected: model.ErrNotFound},
 		{name: "invalid argument", forceError: model.ForceErrorInvalidArgument, expected: model.ErrInvalidArgument},
-		{name: "already exists", forceError: model.ForceErrorAlreadyExists, expected: model.ErrUniqueViolation},
-		{name: "failed precondition", forceError: model.ForceErrorFailedPrecondition, expected: model.ErrRevisionMismatch},
 		{name: "unknown token", forceError: "unknown", expected: model.ErrInvalidArgument},
 	}
 

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"{{ module_path }}/internal/config"
 {% if pg_enabled %}
@@ -16,8 +17,8 @@ type PostgresRepository struct {
 }
 
 func NewPostgresRepository(ctx context.Context, cfg config.PostgresConfig) (*PostgresRepository, error) {
-	if !cfg.Enabled {
-		return nil, fmt.Errorf("postgres module is disabled in config")
+	if strings.TrimSpace(cfg.DSN) == "" {
+		return nil, fmt.Errorf("PG_DSN is required for postgres repository")
 	}
 
 	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)

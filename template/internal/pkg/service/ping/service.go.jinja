@@ -1,38 +1,9 @@
 package ping
 
-import (
-	"context"
-	"strings"
-
-	"{{ module_path }}/internal/pkg/model"
-)
-
 type Service struct {
 	serviceName string
 }
 
 func New(serviceName string) *Service {
 	return &Service{serviceName: serviceName}
-}
-
-func (s *Service) Ping(_ context.Context, req model.PingRequest) (model.PingResponse, error) {
-	switch strings.ToLower(strings.TrimSpace(req.ForceError)) {
-	case "":
-		// no forced error
-	case model.ForceErrorNotFound:
-		return model.PingResponse{}, model.ErrNotFound
-	case model.ForceErrorInvalidArgument:
-		return model.PingResponse{}, model.ErrInvalidArgument
-	case model.ForceErrorAlreadyExists:
-		return model.PingResponse{}, model.ErrUniqueViolation
-	case model.ForceErrorFailedPrecondition:
-		return model.PingResponse{}, model.ErrRevisionMismatch
-	default:
-		return model.PingResponse{}, model.ErrInvalidArgument
-	}
-
-	return model.PingResponse{
-		Status:  "ok",
-		Service: s.serviceName,
-	}, nil
 }

@@ -4,27 +4,29 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+{% if grpc_enabled %}
+	"net"
+{% endif %}
+	"net/http"
 	"os"
 	"os/signal"
 	"strings"
 	"syscall"
 	"time"
 
-	appping "{{ module_path }}/internal/app/ping"
 	"{{ module_path }}/internal/config"
-	{% if kafka_enabled %}
-	"{{ module_path }}/internal/pkg/infrastructure/kafka"
-	{% endif %}
-	{% if pg_enabled %}
-	"{{ module_path }}/internal/pkg/repository"
-	{% endif %}
+	appping "{{ module_path }}/internal/app/ping"
 	pingservice "{{ module_path }}/internal/pkg/service/ping"
-	{% if grpc_enabled %}
-	"net"
-	{% endif %}
-	{% if http_enabled %}
-	"net/http"
-	{% endif %}
+{% if grpc_enabled %}
+	"{{ module_path }}/internal/app/interceptor"
+	"google.golang.org/grpc"
+{% endif %}
+{% if pg_enabled %}
+	"{{ module_path }}/internal/pkg/repository"
+{% endif %}
+{% if kafka_enabled %}
+	"{{ module_path }}/internal/pkg/infrastructure/kafka"
+{% endif %}
 )
 
 const (
@@ -32,26 +34,41 @@ const (
 	shutdownTimeout = 10 * time.Second
 )
 
+{% if not grpc_enabled %}
+const openAPISpecPath = "internal/pb/{{ module_path }}/openapi/swagger.json"
+{% endif %}
+
+type shutdownFn func(context.Context) error
+
 func main() {
+	//
+	// Config and core dependencies.
+	//
 	cfg := config.MustLoad()
 	logger := newLogger(cfg.Observability.LogLevel)
-	pingSvc := pingservice.New(serviceName)
+	pingSvc := pingservice.New(cfg.Service.Name)
 
+	//
+	// Lifecycle and graceful shutdown primitives.
+	//
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
 	errCh := make(chan error, 4)
-	shutdownFns := make([]func(context.Context) error, 0, 4)
+	shutdownFns := make([]shutdownFn, 0, 4)
+
 {% if pg_enabled %}
-	if cfg.Postgres.Enabled {
+	//
+	// Optional PostgreSQL module.
+	//
+	if strings.TrimSpace(cfg.Postgres.DSN) != "" {
 		repo, err := repository.NewPostgresRepository(ctx, cfg.Postgres)
 		if err != nil {
-			logger.Error("init postgres repository", slog.Any("error", err))
+			logger.Error("init postgres", slog.Any("error", err))
 			os.Exit(1)
 		}
-
 		if err := repo.Ping(ctx); err != nil {
-			logger.Error("ping postgres", slog.Any("error", err))
+			logger.Error("postgres ping", slog.Any("error", err))
 			os.Exit(1)
 		}
 
@@ -60,85 +77,146 @@ func main() {
 		})
 	}
 {% endif %}
+
 {% if kafka_enabled %}
-	if cfg.Kafka.Enabled {
+	//
+	// Optional Kafka module.
+	//
+	if len(cfg.Kafka.BrokersList()) > 0 {
 		kafkaClient, err := kafka.NewClient(cfg.Kafka)
 		if err != nil {
-			logger.Error("init kafka client", slog.Any("error", err))
+			logger.Error("init kafka", slog.Any("error", err))
 			os.Exit(1)
 		}
 
 		shutdownFns = append(shutdownFns, func(_ context.Context) error {
 			return kafkaClient.Close()
 		})
+
 {% if kafka_producer_enabled %}
-		if cfg.Kafka.ProducerEnabled {
-			if err := kafkaClient.PublishStartupEvent(ctx, serviceName); err != nil {
-				logger.Warn("publish startup event", slog.Any("error", err))
-			}
+		if err := kafkaClient.PublishStartupEvent(ctx, cfg.Service.Name); err != nil {
+			logger.Warn("publish startup kafka event", slog.Any("error", err))
 		}
 {% endif %}
 {% if kafka_consumer_enabled %}
-		if cfg.Kafka.ConsumerEnabled {
-			consumerErrCh := kafkaClient.StartConsumer(ctx, func(msg []byte) {
-				logger.Debug("consumed kafka message", slog.String("message", string(msg)))
-			})
-
-			go func() {
-				for consumerErr := range consumerErrCh {
-					errCh <- fmt.Errorf("kafka consumer: %w", consumerErr)
-				}
-			}()
-		}
+		consumerErrCh := kafkaClient.StartConsumer(ctx, func(_ []byte) {})
+		go func() {
+			if err, ok := <-consumerErrCh; ok && err != nil {
+				errCh <- fmt.Errorf("kafka consumer: %w", err)
+			}
+		}()
 {% endif %}
 	}
 {% endif %}
+
+	//
+	// Public HTTP routes.
+	//
+	publicMux := http.NewServeMux()
+
 {% if http_enabled %}
-	if cfg.HTTP.Enabled {
-		httpServer := appping.NewHTTPServer(cfg.HTTP.Port, pingSvc)
-		shutdownFns = append(shutdownFns, httpServer.Shutdown)
-
-		go func() {
-			logger.Info("http server listening", slog.Int("port", cfg.HTTP.Port))
-			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-				errCh <- fmt.Errorf("http server: %w", err)
-			}
-		}()
-	}
+	pingHTTP := appping.NewHTTPHandler(pingSvc)
+	appping.RegisterHTTPRoutes(publicMux, pingHTTP)
 {% endif %}
+
 {% if grpc_enabled %}
-	if cfg.GRPC.Enabled {
-		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
-		if err != nil {
-			logger.Error("failed to listen on gRPC port", slog.Int("port", cfg.GRPC.Port), slog.Any("error", err))
-			os.Exit(1)
-		}
+	//
+	// gRPC server and grpc-gateway bridge.
+	//
+	pingImpl := appping.NewImplementation(pingSvc)
+	pingDesc := pingImpl.GetDescription()
+	pingDesc.WithHTTPUnaryInterceptor(interceptor.ErrorHandlingInterceptor)
 
-		grpcServer := appping.NewGRPCServer(pingSvc)
-		shutdownFns = append(shutdownFns, func(shutdownCtx context.Context) error {
-			done := make(chan struct{})
-			go func() {
-				grpcServer.GracefulStop()
-				close(done)
-			}()
+	gatewayMux, err := newGatewayMux(ctx, pingDesc)
+	if err != nil {
+		logger.Error("build grpc gateway mux", slog.Any("error", err))
+		os.Exit(1)
+	}
+	publicMux.Handle("/", gatewayMux)
 
-			select {
-			case <-done:
-				return nil
-			case <-shutdownCtx.Done():
-				grpcServer.Stop()
-				return shutdownCtx.Err()
-			}
-		})
+	grpcSrv := grpc.NewServer(
+		grpc.ChainUnaryInterceptor(interceptor.ErrorHandlingInterceptor),
+	)
+	pingDesc.RegisterGRPC(grpcSrv)
 
+	grpcAddr := fmt.Sprintf(":%d", cfg.GRPC.Port)
+	grpcLis, err := net.Listen("tcp", grpcAddr)
+	if err != nil {
+		logger.Error("listen grpc", slog.String("addr", grpcAddr), slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	shutdownFns = append(shutdownFns, func(sctx context.Context) error {
+		done := make(chan struct{})
 		go func() {
-			logger.Info("grpc server listening", slog.Int("port", cfg.GRPC.Port))
-			if serveErr := grpcServer.Serve(lis); serveErr != nil {
-				errCh <- fmt.Errorf("grpc server: %w", serveErr)
-			}
+			grpcSrv.GracefulStop()
+			close(done)
 		}()
+
+		select {
+		case <-done:
+			return nil
+		case <-sctx.Done():
+			grpcSrv.Stop()
+			return sctx.Err()
+		}
+	})
+
+	go func() {
+		logger.Info("grpc server listening", slog.Int("port", cfg.GRPC.Port))
+		if serveErr := grpcSrv.Serve(grpcLis); serveErr != nil {
+			errCh <- fmt.Errorf("grpc server: %w", serveErr)
+		}
+	}()
+
+	spec := pingDesc.SwaggerDef()
+	if len(spec) == 0 {
+		logger.Error("openapi spec is empty")
+		os.Exit(1)
+	}
+{% else %}
+	spec, err := os.ReadFile(openAPISpecPath)
+	if err != nil {
+		logger.Error("read openapi spec", slog.String("path", openAPISpecPath), slog.Any("error", err))
+		os.Exit(1)
 	}
 {% endif %}
+
+	//
+	// Public HTTP server.
+	//
+	publicSrv := newHTTPServer(cfg.HTTP.Port, publicMux)
+	shutdownFns = append(shutdownFns, publicSrv.Shutdown)
+
+	go func() {
+		logger.Info("public http server listening", slog.Int("port", cfg.HTTP.Port))
+		if err := publicSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- fmt.Errorf("public http server: %w", err)
+		}
+	}()
+
+	//
+	// Docs/admin server.
+	//
+	upstream := fmt.Sprintf("http://127.0.0.1:%d", cfg.HTTP.Port)
+	docsSrv, err := newAdminDocsServer(cfg.Docs.Port, upstream, spec)
+	if err != nil {
+		logger.Error("init docs server", slog.Any("error", err))
+		os.Exit(1)
+	}
+
+	shutdownFns = append(shutdownFns, docsSrv.Shutdown)
+
+	go func() {
+		logger.Info("admin docs server listening", slog.Int("port", cfg.Docs.Port))
+		if err := docsSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			errCh <- fmt.Errorf("admin docs server: %w", err)
+		}
+	}()
+
+	//
+	// Wait for termination.
+	//
 	select {
 	case err := <-errCh:
 		logger.Error("server error", slog.Any("error", err))
@@ -146,11 +224,14 @@ func main() {
 		logger.Info("shutdown signal received")
 	}
 
+	//
+	// Graceful shutdown in reverse order.
+	//
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer cancel()
 
-	for _, shutdownFn := range shutdownFns {
-		if err := shutdownFn(shutdownCtx); err != nil {
+	for i := len(shutdownFns) - 1; i >= 0; i-- {
+		if err := shutdownFns[i](shutdownCtx); err != nil {
 			logger.Warn("shutdown error", slog.Any("error", err))
 		}
 	}
@@ -165,10 +246,7 @@ func newLogger(levelRaw string) *slog.Logger {
 		level = slog.LevelWarn
 	case "error":
 		level = slog.LevelError
-	case "", "info":
-		level = slog.LevelInfo
 	}
 
-	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
-	return slog.New(handler)
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level}))
 }

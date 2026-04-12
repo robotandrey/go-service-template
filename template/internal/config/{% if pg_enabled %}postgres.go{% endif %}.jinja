@@ -1,0 +1,11 @@
+package config
+
+{% if pg_enabled %}
+import "time"
+
+type PostgresConfig struct {
+	DSN             string        `env:"PG_DSN" yaml:"dsn"`
+	MaxConns        int32         `env:"PG_MAX_CONNS" yaml:"max_conns" validate:"gte=1"`
+	ConnMaxLifetime time.Duration `env:"PG_CONN_MAX_LIFETIME" yaml:"conn_max_lifetime"`
+}
+{% endif %}

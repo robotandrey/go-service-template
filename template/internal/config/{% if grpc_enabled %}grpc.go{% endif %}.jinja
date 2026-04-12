@@ -1,0 +1,5 @@
+package config
+
+type GRPCConfig struct {
+	Port int `env:"GRPC_PORT" yaml:"port" validate:"gte=1,lte=65535"`
+}

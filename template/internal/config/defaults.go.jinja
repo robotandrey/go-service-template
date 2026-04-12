@@ -1,0 +1,48 @@
+package config
+
+{% if pg_enabled %}
+import "time"
+{% endif %}
+
+func DefaultConfig() AppConfig {
+	return AppConfig{
+		Service: ServiceConfig{
+			Name:       "{{ service_name }}",
+			ModulePath: "{{ module_path }}",
+		},
+		HTTP: HTTPConfig{
+			Port: 8080,
+		},
+{% if grpc_enabled %}
+		GRPC: GRPCConfig{
+			Port: 9090,
+		},
+{% endif %}
+		Docs: DocsConfig{
+			Port: 8081,
+		},
+		Observability: ObservabilityConfig{
+			LogLevel: "info",
+		},
+{% if pg_enabled %}
+		Postgres: PostgresConfig{
+			DSN:             "",
+			MaxConns:        4,
+			ConnMaxLifetime: 30 * time.Minute,
+		},
+{% endif %}
+{% if kafka_enabled %}
+		Kafka: KafkaConfig{
+			Brokers:  "",
+			ClientID: "{{ service_name }}",
+{% if kafka_producer_enabled %}
+			TopicOut: "{{ service_name }}.events.v1",
+{% endif %}
+{% if kafka_consumer_enabled %}
+			TopicIn: "{{ service_name }}.events.v1",
+			GroupID: "{{ service_name }}.group.v1",
+{% endif %}
+		},
+{% endif %}
+	}
+}

@@ -14,11 +14,8 @@ service_name:
 
 module_path:
   type: str
-  help: "Go module path (for example: github.com/acme/users-api)"
-  validator: >-
-    {% if not module_path %}
-    module_path is required.
-    {% endif %}
+  default: "example.com/{{ service_name }}"
+  help: "Go module path (for example: github.com/acme/users-api). Default: github.com/<service_name>"
 
 http_enabled:
   type: bool
@@ -70,3 +67,4 @@ _exclude:
   - ".idea"
   - "~*"
   - ".DS_Store"
+  - "{% if grpc_enabled %}.deploy/openapi{% else %}.deploy/openapi/__never_match__{% endif %}"

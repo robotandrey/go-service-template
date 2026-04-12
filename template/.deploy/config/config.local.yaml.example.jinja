@@ -1,0 +1,37 @@
+service:
+  name: {{ service_name }}
+  module_path: {{ module_path }}
+
+http:
+  port: 8080
+
+{% if grpc_enabled %}
+grpc:
+  port: 9090
+
+{% endif %}
+docs:
+  port: 8081
+
+observability:
+  log_level: info
+
+{% if pg_enabled %}
+postgres:
+  dsn: ""
+  max_conns: 4
+  conn_max_lifetime: 30m
+
+{% endif %}
+{% if kafka_enabled %}
+kafka:
+  brokers: ""
+  client_id: {{ service_name }}
+{% if kafka_producer_enabled %}
+  topic_out: {{ service_name }}.events.v1
+{% endif %}
+{% if kafka_consumer_enabled %}
+  topic_in: {{ service_name }}.events.v1
+  group_id: {{ service_name }}.group.v1
+{% endif %}
+{% endif %}

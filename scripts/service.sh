@@ -53,37 +53,59 @@ for value in "$HTTP_ENABLED" "$GRPC_ENABLED" "$PG_ENABLED" "$KAFKA_ENABLED" "$KA
   fi
 done
 
-ensure_copier
-
-cmd=(copier copy -f "$ROOT_DIR" "$TARGET_DIR")
-
-non_interactive=false
-if [[ -n "$SERVICE_NAME" || -n "$MODULE_PATH" ]]; then
-  non_interactive=true
-fi
-
-if [[ "$non_interactive" == "true" ]]; then
+if [[ -n "$SERVICE_NAME" || -n "$MODULE_PATH" || -n "$HTTP_ENABLED" || -n "$GRPC_ENABLED" || -n "$PG_ENABLED" || -n "$KAFKA_ENABLED" || -n "$KAFKA_PRODUCER_ENABLED" || -n "$KAFKA_CONSUMER_ENABLED" || -n "$DOCKER_ENABLED" ]]; then
   [[ -n "$SERVICE_NAME" ]] || fail "SERVICE_NAME is required in non-interactive mode"
-  [[ -n "$MODULE_PATH" ]] || fail "MODULE_PATH is required in non-interactive mode"
 
-  cmd+=(
+  HTTP_ENABLED="${HTTP_ENABLED:-false}"
+  GRPC_ENABLED="${GRPC_ENABLED:-true}"
+  PG_ENABLED="${PG_ENABLED:-false}"
+  KAFKA_ENABLED="${KAFKA_ENABLED:-false}"
+  KAFKA_PRODUCER_ENABLED="${KAFKA_PRODUCER_ENABLED:-false}"
+  KAFKA_CONSUMER_ENABLED="${KAFKA_CONSUMER_ENABLED:-false}"
+  DOCKER_ENABLED="${DOCKER_ENABLED:-false}"
+
+  if [[ "$HTTP_ENABLED" != "true" && "$GRPC_ENABLED" != "true" ]]; then
+    fail "at least one transport must be enabled: HTTP_ENABLED or GRPC_ENABLED"
+  fi
+
+  if [[ "$KAFKA_ENABLED" == "true" && "$KAFKA_PRODUCER_ENABLED" != "true" && "$KAFKA_CONSUMER_ENABLED" != "true" ]]; then
+    fail "when KAFKA_ENABLED=true, set KAFKA_PRODUCER_ENABLED=true or KAFKA_CONSUMER_ENABLED=true"
+  fi
+
+  ensure_copier
+
+  echo "Generating service into: $TARGET_DIR"
+
+  copier_args=(
+    copy
+    -w "$ROOT_DIR"
+    "$TARGET_DIR"
+    --defaults
     -d "service_name=$SERVICE_NAME"
-    -d "module_path=$MODULE_PATH"
+    -d "http_enabled=$HTTP_ENABLED"
+    -d "grpc_enabled=$GRPC_ENABLED"
+    -d "pg_enabled=$PG_ENABLED"
+    -d "kafka_enabled=$KAFKA_ENABLED"
+    -d "kafka_producer_enabled=$KAFKA_PRODUCER_ENABLED"
+    -d "kafka_consumer_enabled=$KAFKA_CONSUMER_ENABLED"
+    -d "docker_enabled=$DOCKER_ENABLED"
   )
 
-  [[ -n "$HTTP_ENABLED" ]] && cmd+=(-d "http_enabled=$HTTP_ENABLED")
-  [[ -n "$GRPC_ENABLED" ]] && cmd+=(-d "grpc_enabled=$GRPC_ENABLED")
-  [[ -n "$PG_ENABLED" ]] && cmd+=(-d "pg_enabled=$PG_ENABLED")
-  [[ -n "$KAFKA_ENABLED" ]] && cmd+=(-d "kafka_enabled=$KAFKA_ENABLED")
-  [[ -n "$KAFKA_PRODUCER_ENABLED" ]] && cmd+=(-d "kafka_producer_enabled=$KAFKA_PRODUCER_ENABLED")
-  [[ -n "$KAFKA_CONSUMER_ENABLED" ]] && cmd+=(-d "kafka_consumer_enabled=$KAFKA_CONSUMER_ENABLED")
-  [[ -n "$DOCKER_ENABLED" ]] && cmd+=(-d "docker_enabled=$DOCKER_ENABLED")
-fi
+  if [[ -n "$MODULE_PATH" ]]; then
+    copier_args+=(-d "module_path=$MODULE_PATH")
+  fi
 
-echo "Generating service into: $TARGET_DIR"
-"${cmd[@]}"
+  copier "${copier_args[@]}"
+else
+  ensure_copier
+
+  echo "Generating service into: $TARGET_DIR"
+  # Interactive mode: Copier asks questions in its native UI.
+  copier copy -w "$ROOT_DIR" "$TARGET_DIR"
+fi
 
 echo
 echo "Done. Next steps:"
 echo "  cd $TARGET_DIR"
+echo "  make generate"
 echo "  make run"

@@ -1,0 +1,74 @@
+package ping
+
+import (
+	"context"
+	"errors"
+	"testing"
+
+	pb "{{ module_path }}/internal/pb/{{ module_path }}/api/{{ service_name }}"
+	"{{ module_path }}/internal/pkg/model"
+)
+
+type grpcStubService struct {
+	resp model.PingResponse
+	err  error
+	req  model.PingRequest
+}
+
+func (s *grpcStubService) Ping(_ context.Context, req model.PingRequest) (model.PingResponse, error) {
+	s.req = req
+	return s.resp, s.err
+}
+
+func TestPingHandlerSuccess(t *testing.T) {
+	t.Parallel()
+
+	stub := &grpcStubService{
+		resp: model.PingResponse{Status: "ok", Service: "svc"},
+	}
+
+	impl := NewImplementation(stub)
+	resp, err := impl.Ping(context.Background(), &pb.PingRequest{ForceError: model.ForceErrorNotFound})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if resp.GetStatus() != "ok" {
+		t.Fatalf("unexpected status: %q", resp.GetStatus())
+	}
+	if resp.GetService() != "svc" {
+		t.Fatalf("unexpected service: %q", resp.GetService())
+	}
+	if stub.req.ForceError != model.ForceErrorNotFound {
+		t.Fatalf("unexpected forceError: %q", stub.req.ForceError)
+	}
+}
+
+func TestPingHandlerNilRequest(t *testing.T) {
+	t.Parallel()
+
+	stub := &grpcStubService{
+		resp: model.PingResponse{Status: "ok", Service: "svc"},
+	}
+
+	impl := NewImplementation(stub)
+	if _, err := impl.Ping(context.Background(), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if stub.req.ForceError != "" {
+		t.Fatalf("unexpected forceError for nil request: %q", stub.req.ForceError)
+	}
+}
+
+func TestPingHandlerErrorPassthrough(t *testing.T) {
+	t.Parallel()
+
+	expectedErr := errors.New("boom")
+	stub := &grpcStubService{err: expectedErr}
+
+	impl := NewImplementation(stub)
+	_, err := impl.Ping(context.Background(), &pb.PingRequest{})
+	if err != expectedErr {
+		t.Fatalf("expected same error instance, got: %v", err)
+	}
+}

@@ -7,8 +7,4 @@ var (
 	ErrNotFound = errors.New("entity not found")
 	// ErrInvalidArgument is returned when request arguments are invalid.
 	ErrInvalidArgument = errors.New("invalid argument")
-	// ErrUniqueViolation is returned when a unique constraint is violated.
-	ErrUniqueViolation = errors.New("an attempt to violate unique fields constraint")
-	// ErrRevisionMismatch is returned when optimistic locking fails.
-	ErrRevisionMismatch = errors.New("revision mismatch")
 )

@@ -29,10 +29,6 @@ func grpcCodeFromReason(reason string) codes.Code {
 		return codes.NotFound
 	case ReasonInvalidArgument:
 		return codes.InvalidArgument
-	case ReasonUniqueViolation:
-		return codes.AlreadyExists
-	case ReasonRevisionMismatch:
-		return codes.FailedPrecondition
 	default:
 		return codes.Internal
 	}

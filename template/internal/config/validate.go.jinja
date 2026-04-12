@@ -1,0 +1,46 @@
+package config
+
+import (
+	"fmt"
+{% if pg_enabled or kafka_enabled %}
+	"strings"
+{% endif %}
+
+	"github.com/go-playground/validator/v10"
+)
+
+func (c AppConfig) Validate() error {
+	v := validator.New(validator.WithRequiredStructEnabled())
+	if err := v.Struct(c); err != nil {
+		return fmt.Errorf("validate config schema: %w", err)
+	}
+
+{% if pg_enabled %}
+	if strings.TrimSpace(c.Postgres.DSN) != "" && c.Postgres.MaxConns < 1 {
+		return fmt.Errorf("config: PG_MAX_CONNS must be >= 1 when PG_DSN is set")
+	}
+{% endif %}
+
+{% if kafka_enabled %}
+	if len(c.Kafka.BrokersList()) > 0 {
+		if strings.TrimSpace(c.Kafka.ClientID) == "" {
+			return fmt.Errorf("config: KAFKA_CLIENT_ID is required when KAFKA_BROKERS is set")
+		}
+{% if kafka_producer_enabled %}
+		if strings.TrimSpace(c.Kafka.TopicOut) == "" {
+			return fmt.Errorf("config: KAFKA_TOPIC_OUT is required when KAFKA_BROKERS is set")
+		}
+{% endif %}
+{% if kafka_consumer_enabled %}
+		if strings.TrimSpace(c.Kafka.TopicIn) == "" {
+			return fmt.Errorf("config: KAFKA_TOPIC_IN is required when KAFKA_BROKERS is set")
+		}
+		if strings.TrimSpace(c.Kafka.GroupID) == "" {
+			return fmt.Errorf("config: KAFKA_GROUP_ID is required when KAFKA_BROKERS is set")
+		}
+{% endif %}
+	}
+{% endif %}
+
+	return nil
+}

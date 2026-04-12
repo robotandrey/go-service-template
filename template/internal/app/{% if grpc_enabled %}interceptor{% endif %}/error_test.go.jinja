@@ -24,8 +24,6 @@ func TestErrorHandlingInterceptorKnownErrors(t *testing.T) {
 	}{
 		{name: "not found", inErr: model.ErrNotFound, expectedCode: codes.NotFound, expectedReason: errorx.ReasonNotFound},
 		{name: "invalid argument", inErr: model.ErrInvalidArgument, expectedCode: codes.InvalidArgument, expectedReason: errorx.ReasonInvalidArgument},
-		{name: "already exists", inErr: model.ErrUniqueViolation, expectedCode: codes.AlreadyExists, expectedReason: errorx.ReasonUniqueViolation},
-		{name: "failed precondition", inErr: model.ErrRevisionMismatch, expectedCode: codes.FailedPrecondition, expectedReason: errorx.ReasonRevisionMismatch},
 	}
 
 	for _, tc := range testCases {

@@ -1,0 +1,5 @@
+package config
+
+type DocsConfig struct {
+	Port int `env:"DOCS_PORT" yaml:"port" validate:"gte=1,lte=65535"`
+}

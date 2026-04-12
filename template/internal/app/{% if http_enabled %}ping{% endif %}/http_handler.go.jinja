@@ -4,14 +4,10 @@ import (
 	"encoding/json"
 	"log"
 	"net/http"
-	"strconv"
-	"time"
 
 	"{{ module_path }}/internal/app/errorx"
 	"{{ module_path }}/internal/pkg/model"
 )
-
-const readHeaderTimeout = 5 * time.Second
 
 type HTTPHandler struct {
 	pingService Service
@@ -26,22 +22,18 @@ type healthResponse struct {
 	Status string `json:"status"`
 }
 
-func NewHTTPServer(port int, pingService Service) *http.Server {
-	handler := NewHTTPHandler(pingService)
-	mux := http.NewServeMux()
+func NewHTTPHandler(pingService Service) *HTTPHandler {
+	return &HTTPHandler{pingService: pingService}
+}
+
+func RegisterHTTPRoutes(mux *http.ServeMux, handler *HTTPHandler) {
+	if mux == nil || handler == nil {
+		return
+	}
+
 	mux.HandleFunc("GET /healthz", handler.Healthz)
 	mux.HandleFunc("GET /readyz", handler.Readyz)
 	mux.HandleFunc("GET /v1/ping", handler.Ping)
-
-	return &http.Server{
-		Addr:              ":" + strconv.Itoa(port),
-		Handler:           mux,
-		ReadHeaderTimeout: readHeaderTimeout,
-	}
-}
-
-func NewHTTPHandler(pingService Service) *HTTPHandler {
-	return &HTTPHandler{pingService: pingService}
 }
 
 func (h *HTTPHandler) Healthz(w http.ResponseWriter, _ *http.Request) {

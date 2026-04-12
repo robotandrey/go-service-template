@@ -29,6 +29,19 @@ jobs:
       - name: Generate
         run: make generate
 
+      - name: Generate mocks
+        run: make mocks
+
+      - name: Validate OpenAPI artifact
+        run: |
+          test -f internal/pb/{{ module_path }}/openapi/swagger.json
+          python -m json.tool internal/pb/{{ module_path }}/openapi/swagger.json >/dev/null
+
+      - name: Validate generated layout
+        run: |
+          test -d internal/pb/{{ module_path }}
+          test -f test/mock/internal/app/ping/service_mock.go
+
       - name: Lint
         run: make lint
 
@@ -40,6 +53,6 @@ jobs:
 
       - name: Validate compose config (optional)
         run: |
-          if [ -f docker-compose.yml ]; then
-            docker compose config >/dev/null
+          if [ -f .deploy/docker/docker-compose.yml ]; then
+            docker compose -f .deploy/docker/docker-compose.yml config >/dev/null
           fi

@@ -1,0 +1,105 @@
+package main
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"net/http/httputil"
+	"net/url"
+	"strconv"
+)
+
+const docsUIHTML = `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>API Docs</title>
+  <link rel="stylesheet" href="https://unpkg.com/swagger-ui-dist@5/swagger-ui.css" />
+</head>
+<body>
+  <div id="swagger-ui"></div>
+  <script src="https://unpkg.com/swagger-ui-dist@5/swagger-ui-bundle.js"></script>
+  <script>
+    window.onload = function () {
+      window.ui = SwaggerUIBundle({
+        url: '/swagger.json',
+        dom_id: '#swagger-ui',
+        deepLinking: true
+      });
+    };
+  </script>
+</body>
+</html>`
+
+func newAdminDocsServer(port int, upstreamURL string, rawSpec []byte) (*http.Server, error) {
+	target, err := url.Parse(upstreamURL)
+	if err != nil {
+		return nil, fmt.Errorf("parse upstream url %q: %w", upstreamURL, err)
+	}
+	if target.Scheme == "" || target.Host == "" {
+		return nil, fmt.Errorf("upstream url must include scheme and host: %q", upstreamURL)
+	}
+
+	spec, err := patchSpec(rawSpec)
+	if err != nil {
+		return nil, err
+	}
+
+	proxy := httputil.NewSingleHostReverseProxy(target)
+	proxy.ErrorHandler = func(w http.ResponseWriter, _ *http.Request, proxyErr error) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadGateway)
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"error": fmt.Sprintf("docs upstream error: %v", proxyErr),
+		})
+	}
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /docs", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/docs/", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("GET /docs/", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		_, _ = w.Write([]byte(docsUIHTML))
+	})
+	mux.HandleFunc("GET /swagger.json", func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write(spec)
+	})
+	mux.HandleFunc("GET /openapi/swagger.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/swagger.json", http.StatusMovedPermanently)
+	})
+	mux.HandleFunc("GET /docs/swagger.json", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/swagger.json", http.StatusMovedPermanently)
+	})
+	mux.Handle("/", proxy)
+
+	return &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           mux,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}, nil
+}
+
+func patchSpec(rawSpec []byte) ([]byte, error) {
+	if len(rawSpec) == 0 {
+		return nil, fmt.Errorf("openapi spec is empty")
+	}
+
+	var spec map[string]any
+	if err := json.Unmarshal(rawSpec, &spec); err != nil {
+		return nil, fmt.Errorf("decode openapi spec: %w", err)
+	}
+
+	delete(spec, "host")
+	delete(spec, "schemes")
+	delete(spec, "basePath")
+
+	encoded, err := json.Marshal(spec)
+	if err != nil {
+		return nil, fmt.Errorf("encode openapi spec: %w", err)
+	}
+
+	return encoded, nil
+}

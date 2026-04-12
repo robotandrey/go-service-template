@@ -6,46 +6,74 @@ import (
 	"testing"
 )
 
-func TestValidateTransport(t *testing.T) {
-	cfg := defaultConfig()
-	cfg.HTTP.Enabled = false
-	cfg.GRPC.Enabled = false
-
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected transport validation error")
-	}
-}
-
-func TestValidateKafkaModes(t *testing.T) {
-	cfg := defaultConfig()
-	cfg.Kafka.Enabled = true
-	cfg.Kafka.ProducerEnabled = false
-	cfg.Kafka.ConsumerEnabled = false
-
-	if err := cfg.Validate(); err == nil {
-		t.Fatal("expected kafka mode validation error")
-	}
-}
-
-func TestPrecedenceEnvOverYAML(t *testing.T) {
-	t.Setenv("DEV_LOAD_DOTENV", "false")
-
-	dir := t.TempDir()
-	cfgPath := filepath.Join(dir, "config.local.yaml")
-	content := []byte("http:\n  port: 18080\n")
-	if err := os.WriteFile(cfgPath, content, 0o600); err != nil {
-		t.Fatalf("write yaml: %v", err)
-	}
-
-	t.Setenv("DEV_CONFIG_FILE", cfgPath)
-	t.Setenv("HTTP_PORT", "18181")
+func TestLoadDefaults(t *testing.T) {
+	t.Setenv("CONFIG_PATH", "")
 
 	cfg, err := Load()
 	if err != nil {
-		t.Fatalf("load config: %v", err)
+		t.Fatalf("Load() unexpected error: %v", err)
 	}
-
-	if cfg.HTTP.Port != 18181 {
-		t.Fatalf("expected env precedence for HTTP_PORT, got %d", cfg.HTTP.Port)
+	if cfg.Service.Name != "{{ service_name }}" {
+		t.Fatalf("unexpected service name: %q", cfg.Service.Name)
+	}
+	if cfg.HTTP.Port != 8080 {
+		t.Fatalf("unexpected default HTTP port: %d", cfg.HTTP.Port)
+	}
+{% if grpc_enabled %}
+	if cfg.GRPC.Port != 9090 {
+		t.Fatalf("unexpected default gRPC port: %d", cfg.GRPC.Port)
+	}
+{% endif %}
+	if cfg.Docs.Port != 8081 {
+		t.Fatalf("unexpected default docs port: %d", cfg.Docs.Port)
 	}
 }
+
+func TestLoadEnvOverridesYAML(t *testing.T) {
+	tmpDir := t.TempDir()
+	cfgFile := filepath.Join(tmpDir, "config.local.yaml")
+
+	yaml := []byte(`http:
+  port: 18080
+{% if grpc_enabled %}
+grpc:
+  port: 19090
+{% endif %}
+`)
+	if err := os.WriteFile(cfgFile, yaml, 0o600); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+
+	t.Setenv("CONFIG_PATH", cfgFile)
+	t.Setenv("HTTP_PORT", "28080")
+{% if grpc_enabled %}
+	t.Setenv("GRPC_PORT", "29090")
+{% endif %}
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() unexpected error: %v", err)
+	}
+	if cfg.HTTP.Port != 28080 {
+		t.Fatalf("expected HTTP.Port from env, got %d", cfg.HTTP.Port)
+	}
+{% if grpc_enabled %}
+	if cfg.GRPC.Port != 29090 {
+		t.Fatalf("expected GRPC.Port from env, got %d", cfg.GRPC.Port)
+	}
+{% endif %}
+}
+
+{% if pg_enabled %}
+func TestValidatePostgresMaxConns(t *testing.T) {
+	t.Parallel()
+
+	cfg := DefaultConfig()
+	cfg.Postgres.DSN = "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable"
+	cfg.Postgres.MaxConns = 0
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected validation error for PG_MAX_CONNS")
+	}
+}
+{% endif %}

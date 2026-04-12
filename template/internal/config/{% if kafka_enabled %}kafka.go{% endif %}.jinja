@@ -1,0 +1,29 @@
+package config
+
+{% if kafka_enabled %}
+import "strings"
+
+type KafkaConfig struct {
+	Brokers  string `env:"KAFKA_BROKERS" yaml:"brokers"`
+	ClientID string `env:"KAFKA_CLIENT_ID" yaml:"client_id"`
+{% if kafka_producer_enabled %}
+	TopicOut string `env:"KAFKA_TOPIC_OUT" yaml:"topic_out"`
+{% endif %}
+{% if kafka_consumer_enabled %}
+	TopicIn string `env:"KAFKA_TOPIC_IN" yaml:"topic_in"`
+	GroupID string `env:"KAFKA_GROUP_ID" yaml:"group_id"`
+{% endif %}
+}
+
+func (c KafkaConfig) BrokersList() []string {
+	parts := strings.Split(c.Brokers, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part != "" {
+			out = append(out, part)
+		}
+	}
+	return out
+}
+{% endif %}

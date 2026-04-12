@@ -1,0 +1,17 @@
+package config
+
+type AppConfig struct {
+	Service       ServiceConfig       `yaml:"service"`
+	HTTP          HTTPConfig          `yaml:"http"`
+{% if grpc_enabled %}
+	GRPC          GRPCConfig          `yaml:"grpc"`
+{% endif %}
+	Docs          DocsConfig          `yaml:"docs"`
+	Observability ObservabilityConfig `yaml:"observability"`
+{% if pg_enabled %}
+	Postgres      PostgresConfig      `yaml:"postgres"`
+{% endif %}
+{% if kafka_enabled %}
+	Kafka         KafkaConfig         `yaml:"kafka"`
+{% endif %}
+}

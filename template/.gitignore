@@ -5,4 +5,7 @@ coverage.*
 
 .env
 .env.local
+.deploy/config/.env
+.deploy/config/.env.local
+.deploy/config/config.local.yaml
 Makefile.local.mk

@@ -1,18 +1,18 @@
 # Go Service Template
 
-Reusable Copier-based template for creating Go services with optional PostgreSQL, Kafka, and Docker modules.
+Reusable Copier template for Go services with optional PostgreSQL, Kafka, and Docker modules.
 
 ## English
 
 ### Quick Start
 
-1. Generate a service interactively:
+1. Generate service (interactive):
 
 ```bash
 make service TARGET_DIR=./services/users-api
 ```
 
-2. Or generate in non-interactive mode:
+2. Generate service (non-interactive):
 
 ```bash
 make service \
@@ -32,6 +32,8 @@ make service \
 
 ```bash
 cd ./services/users-api
+make generate
+make mocks
 make run
 ```
 
@@ -42,13 +44,7 @@ Required system tools:
 - `make`
 
 `copier` is auto-installed by `make service` (`uv` first, then `pipx`).
-
-Generated service tools are auto-installed by make targets into local `./bin`:
-- `golangci-lint`
-- `buf` (when gRPC enabled)
-- `protoc-gen-go` (when gRPC enabled)
-- `protoc-gen-go-grpc` (when gRPC enabled)
-- `goose` (when PostgreSQL enabled)
+Interactive flow uses native Copier UI.
 
 ### Generation Flags
 
@@ -57,7 +53,7 @@ Required:
 
 Core:
 - `SERVICE_NAME`
-- `MODULE_PATH`
+- `MODULE_PATH` (default: `example.com/<service_name>`)
 - `HTTP_ENABLED` (default: `false`)
 - `GRPC_ENABLED` (default: `true`)
 
@@ -68,56 +64,56 @@ Optional modules:
 - `KAFKA_CONSUMER_ENABLED` (default: `false`, valid only with `KAFKA_ENABLED=true`)
 - `DOCKER_ENABLED` (default: `false`)
 
-Note:
-- PG/Kafka flags add module scaffold files.
-- Runtime PG/Kafka are disabled by default in generated config; enable with env or `config.local.yaml`.
-
 Validation:
 - at least one transport must be enabled (`HTTP_ENABLED` or `GRPC_ENABLED`)
 - when Kafka is enabled, at least one Kafka mode must be enabled (producer or consumer)
 
-### Architecture Contract
+### Runtime Defaults
 
-Generated service follows this base structure:
-- `internal/app` — transport adapters and interceptor layer
-- `internal/pkg/model` — domain models and domain errors
+- Public HTTP: `8080`
+- gRPC: `9090`
+- Admin/docs HTTP: `8081`
+
+Docs endpoints:
+- `GET /docs`
+- `GET /swagger.json`
+- `GET /openapi/swagger.json`
+
+### Template Contract
+
+Generated service structure:
+- `cmd/<service>` — composition root and lifecycle
+- `internal/app` — transport adapters and interceptors
+- `internal/pkg/model` — domain models and errors
 - `internal/pkg/service` — business logic
-- `internal/pkg/repository` — persistence adapters
-- `internal/pkg/infrastructure` — external integrations
-- `internal/pkg/util` — helpers and test utilities
+- `internal/pkg/repository` — PostgreSQL adapters (when enabled)
+- `internal/pkg/infrastructure` — Kafka adapters
+- `internal/pb/<module-path>/...` — generated proto/gateway/openapi artifacts
+- `test/mock` — generated mocks
+- `.deploy/config` — local config examples
+- `.deploy/docker` — Dockerfile and compose assets
+- `.deploy/openapi` — HTTP-only swagger source
 
-Default vertical slice example is `ping` (`model -> service -> app`).
-When gRPC is enabled, generated service includes unary error interceptor.
-When HTTP is enabled, generated service exposes `GET /healthz`, `GET /readyz`, `GET /v1/ping`.
-
-### Generated Service Commands
-
-- `make format`
-- `make check`
-- `make generate`
-- `make lint`
-- `make test`
-- `make test-integration`
-- `make build`
-- `make mocks`
-- `make run`
-- `make up` / `make down` / `make logs` (when Docker/PG/Kafka compose stack is present)
-
-### Configuration Model
-
-Generated service uses typed `AppConfig`:
-- sources precedence: `ENV > YAML > defaults`
-- optional local files: `.env.local`, `.env`, `config.local.yaml`
-- startup-only load (no runtime reload)
+Config load priority:
+- `ENV > YAML > defaults`
 
 ### CI
 
-Generated repository includes GitHub Actions workflow with:
+Root repository includes template matrix CI (`grpc-only`, `http-only`, `dual`, `full`) with:
 - `make generate`
+- `make mocks`
 - `make lint`
 - `make test`
 - `make build`
-- optional compose config check when `docker-compose.yml` exists
+- runtime smoke checks for docs and gateway routes
+
+Generated repository includes baseline CI with:
+- `make generate`
+- `make mocks`
+- `make lint`
+- `make test`
+- `make build`
+- OpenAPI and generated layout checks
 
 ---
 
@@ -125,13 +121,13 @@ Generated repository includes GitHub Actions workflow with:
 
 ### Быстрый старт
 
-1. Сгенерировать сервис в интерактивном режиме:
+1. Сгенерировать сервис (интерактивно):
 
 ```bash
 make service TARGET_DIR=./services/users-api
 ```
 
-2. Или сгенерировать без вопросов (неинтерактивно):
+2. Сгенерировать сервис (неинтерактивно):
 
 ```bash
 make service \
@@ -151,6 +147,8 @@ make service \
 
 ```bash
 cd ./services/users-api
+make generate
+make mocks
 make run
 ```
 
@@ -161,13 +159,7 @@ make run
 - `make`
 
 `copier` ставится автоматически из `make service` (`uv`, затем `pipx`).
-
-Инструменты в сгенерированном сервисе ставятся make-целями автоматически в `./bin`:
-- `golangci-lint`
-- `buf` (если включен gRPC)
-- `protoc-gen-go` (если включен gRPC)
-- `protoc-gen-go-grpc` (если включен gRPC)
-- `goose` (если включен PostgreSQL)
+Интерактивный сценарий использует стандартный Copier UI.
 
 ### Флаги генерации
 
@@ -176,64 +168,64 @@ make run
 
 Базовые:
 - `SERVICE_NAME`
-- `MODULE_PATH`
-- `HTTP_ENABLED` (по умолчанию `false`)
-- `GRPC_ENABLED` (по умолчанию `true`)
+- `MODULE_PATH` (по умолчанию: `example.com/<service_name>`)
+- `HTTP_ENABLED` (по умолчанию: `false`)
+- `GRPC_ENABLED` (по умолчанию: `true`)
 
 Опциональные модули:
-- `PG_ENABLED` (по умолчанию `false`)
-- `KAFKA_ENABLED` (по умолчанию `false`)
-- `KAFKA_PRODUCER_ENABLED` (по умолчанию `false`, валиден только при `KAFKA_ENABLED=true`)
-- `KAFKA_CONSUMER_ENABLED` (по умолчанию `false`, валиден только при `KAFKA_ENABLED=true`)
-- `DOCKER_ENABLED` (по умолчанию `false`)
-
-Важно:
-- флаги PG/Kafka добавляют scaffold-файлы модулей;
-- в runtime PG/Kafka по умолчанию выключены в сгенерированном конфиге, включаются через env или `config.local.yaml`.
+- `PG_ENABLED` (по умолчанию: `false`)
+- `KAFKA_ENABLED` (по умолчанию: `false`)
+- `KAFKA_PRODUCER_ENABLED` (по умолчанию: `false`, валиден только при `KAFKA_ENABLED=true`)
+- `KAFKA_CONSUMER_ENABLED` (по умолчанию: `false`, валиден только при `KAFKA_ENABLED=true`)
+- `DOCKER_ENABLED` (по умолчанию: `false`)
 
 Валидации:
 - должен быть включен хотя бы один транспорт (`HTTP_ENABLED` или `GRPC_ENABLED`)
-- если Kafka включен, должен быть включен producer или consumer
+- при включенной Kafka должен быть включен producer или consumer
 
-### Архитектурный Контракт
+### Runtime defaults
 
-Сгенерированный сервис использует базовую структуру:
-- `internal/app` — transport adapters и interceptor layer
-- `internal/pkg/model` — доменные модели и доменные ошибки
+- Public HTTP: `8080`
+- gRPC: `9090`
+- Admin/docs HTTP: `8081`
+
+Docs endpoints:
+- `GET /docs`
+- `GET /swagger.json`
+- `GET /openapi/swagger.json`
+
+### Контракт шаблона
+
+Структура сгенерированного сервиса:
+- `cmd/<service>` — composition root и lifecycle
+- `internal/app` — transport adapters и interceptors
+- `internal/pkg/model` — доменные модели и ошибки
 - `internal/pkg/service` — бизнес-логика
-- `internal/pkg/repository` — адаптеры хранения
-- `internal/pkg/infrastructure` — внешние интеграции
-- `internal/pkg/util` — helpers/test utilities
+- `internal/pkg/repository` — PostgreSQL-адаптеры (если включены)
+- `internal/pkg/infrastructure` — Kafka адаптеры
+- `internal/pb/<module-path>/...` — generated proto/gateway/openapi артефакты
+- `test/mock` — generated моки
+- `.deploy/config` — примеры локального конфига
+- `.deploy/docker` — Dockerfile и compose assets
+- `.deploy/openapi` — источник swagger для http-only профиля
 
-Эталонный вертикальный срез по умолчанию: `ping` (`model -> service -> app`).
-Если включен gRPC, в сервисе по умолчанию подключается unary error-interceptor.
-Если включен HTTP, сервис по умолчанию поднимает `GET /healthz`, `GET /readyz`, `GET /v1/ping`.
-
-### Команды сгенерированного сервиса
-
-- `make format`
-- `make check`
-- `make generate`
-- `make lint`
-- `make test`
-- `make test-integration`
-- `make build`
-- `make mocks`
-- `make run`
-- `make up` / `make down` / `make logs` (если есть compose-стек Docker/PG/Kafka)
-
-### Модель конфигурации
-
-Сервис использует типизированный `AppConfig`:
-- приоритет источников: `ENV > YAML > defaults`
-- локальные файлы (опционально): `.env.local`, `.env`, `config.local.yaml`
-- загрузка только при старте (без runtime reload)
+Приоритет загрузки конфига:
+- `ENV > YAML > defaults`
 
 ### CI
 
-В сгенерированном репозитории есть GitHub Actions workflow с шагами:
+В корневом репозитории есть template matrix CI (`grpc-only`, `http-only`, `dual`, `full`) с шагами:
 - `make generate`
+- `make mocks`
 - `make lint`
 - `make test`
 - `make build`
-- optional проверка compose-конфига при наличии `docker-compose.yml`
+- runtime smoke-проверки docs и gateway роутов
+
+В сгенерированном репозитории есть базовый CI со шагами:
+- `make generate`
+- `make mocks`
+- `make lint`
+- `make test`
+- `make build`
+- проверка OpenAPI и layout generated-артефактов

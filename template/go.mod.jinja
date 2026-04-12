@@ -5,9 +5,12 @@ go 1.23.0
 require (
 	github.com/caarlos0/env/v11 v11.3.1
 	github.com/go-playground/validator/v10 v10.25.0
+	github.com/golang/mock v1.6.0
 	github.com/joho/godotenv v1.5.1
 	gopkg.in/yaml.v3 v3.0.1
 {% if grpc_enabled %}
+	github.com/grpc-ecosystem/grpc-gateway/v2 v2.22.0
+	golang.org/x/net v0.29.0
 	google.golang.org/grpc v1.66.2
 	google.golang.org/protobuf v1.34.2
 {% endif %}

@@ -1,0 +1,5 @@
+package config
+
+type HTTPConfig struct {
+	Port int `env:"HTTP_PORT" yaml:"port" validate:"gte=1,lte=65535"`
+}

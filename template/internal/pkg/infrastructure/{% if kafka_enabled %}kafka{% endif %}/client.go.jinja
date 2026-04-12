@@ -1,7 +1,9 @@
 package kafka
 
 import (
+{% if kafka_producer_enabled or kafka_consumer_enabled %}
 	"context"
+{% endif %}
 	"errors"
 {% if kafka_enabled %}
 	"fmt"
@@ -17,18 +19,15 @@ import (
 )
 
 type Client struct {
-	enabled bool
 {% if kafka_enabled %}
-	cfg     config.KafkaConfig
-	client  *kgo.Client
+	cfg    config.KafkaConfig
+	client *kgo.Client
+{% else %}
+	cfg config.KafkaConfig
 {% endif %}
 }
 
 func NewClient(cfg config.KafkaConfig) (*Client, error) {
-	if !cfg.Enabled {
-		return &Client{enabled: false}, nil
-	}
-
 {% if kafka_enabled %}
 	brokers := cfg.BrokersList()
 	if len(brokers) == 0 {
@@ -41,7 +40,7 @@ func NewClient(cfg config.KafkaConfig) (*Client, error) {
 	}
 
 {% if kafka_consumer_enabled %}
-	if cfg.ConsumerEnabled {
+	if cfg.TopicIn != "" && cfg.GroupID != "" {
 		opts = append(opts,
 			kgo.ConsumeTopics(cfg.TopicIn),
 			kgo.ConsumerGroup(cfg.GroupID),
@@ -54,7 +53,7 @@ func NewClient(cfg config.KafkaConfig) (*Client, error) {
 		return nil, fmt.Errorf("create kafka client: %w", err)
 	}
 
-	return &Client{enabled: true, cfg: cfg, client: client}, nil
+	return &Client{cfg: cfg, client: client}, nil
 {% else %}
 	return nil, errors.New("kafka module is disabled in this template build")
 {% endif %}
@@ -73,7 +72,10 @@ func (c *Client) Close() error {
 {% if kafka_producer_enabled %}
 func (c *Client) PublishStartupEvent(ctx context.Context, serviceName string) error {
 {% if kafka_enabled %}
-	if c == nil || !c.enabled || !c.cfg.ProducerEnabled {
+	if c == nil || c.client == nil {
+		return nil
+	}
+	if c.cfg.TopicOut == "" {
 		return nil
 	}
 
@@ -98,7 +100,11 @@ func (c *Client) StartConsumer(ctx context.Context, handler func([]byte)) <-chan
 	errCh := make(chan error, 1)
 
 {% if kafka_enabled %}
-	if c == nil || !c.enabled || !c.cfg.ConsumerEnabled {
+	if c == nil || c.client == nil {
+		close(errCh)
+		return errCh
+	}
+	if c.cfg.TopicIn == "" || c.cfg.GroupID == "" {
 		close(errCh)
 		return errCh
 	}

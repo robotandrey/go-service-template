@@ -1,0 +1,21 @@
+package main
+
+import (
+	"net/http"
+	"strconv"
+	"time"
+)
+
+const readHeaderTimeout = 5 * time.Second
+
+func newHTTPServer(port int, handler http.Handler) *http.Server {
+	if handler == nil {
+		handler = http.NewServeMux()
+	}
+
+	return &http.Server{
+		Addr:              ":" + strconv.Itoa(port),
+		Handler:           handler,
+		ReadHeaderTimeout: readHeaderTimeout,
+	}
+}

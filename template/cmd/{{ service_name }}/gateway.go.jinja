@@ -1,0 +1,84 @@
+package main
+
+{% if grpc_enabled %}
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"net/http"
+
+	gwruntime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/status"
+)
+
+type gatewayDescriptor interface {
+	RegisterGateway(context.Context, *gwruntime.ServeMux) error
+}
+
+func newGatewayMux(ctx context.Context, desc gatewayDescriptor) (*gwruntime.ServeMux, error) {
+	if desc == nil {
+		return nil, errors.New("gateway descriptor is nil")
+	}
+
+	mux := gwruntime.NewServeMux(
+		gwruntime.WithIncomingHeaderMatcher(func(s string) (string, bool) {
+			if s == "Authorization" {
+				return s, false
+			}
+			return s, true
+		}),
+		gwruntime.WithErrorHandler(gatewayErrorHandler),
+		gwruntime.WithRoutingErrorHandler(gatewayRoutingErrorHandler),
+	)
+
+	if err := desc.RegisterGateway(ctx, mux); err != nil {
+		return nil, err
+	}
+
+	return mux, nil
+}
+
+func gatewayErrorHandler(
+	_ context.Context,
+	_ *gwruntime.ServeMux,
+	_ gwruntime.Marshaler,
+	w http.ResponseWriter,
+	_ *http.Request,
+	err error,
+) {
+	st := status.Convert(err)
+	httpCode := gwruntime.HTTPStatusFromCode(st.Code())
+
+	response := map[string]string{"error": st.Message()}
+	for _, detail := range st.Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok && info.Reason != "" {
+			response["reason"] = info.Reason
+			break
+		}
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpCode)
+	_ = json.NewEncoder(w).Encode(response)
+}
+
+func gatewayRoutingErrorHandler(
+	_ context.Context,
+	_ *gwruntime.ServeMux,
+	_ gwruntime.Marshaler,
+	w http.ResponseWriter,
+	_ *http.Request,
+	httpStatus int,
+) {
+	if httpStatus < 400 {
+		httpStatus = http.StatusNotFound
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(httpStatus)
+	_ = json.NewEncoder(w).Encode(map[string]string{
+		"error": http.StatusText(httpStatus),
+	})
+}
+{% endif %}

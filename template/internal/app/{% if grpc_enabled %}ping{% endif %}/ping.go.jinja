@@ -1,0 +1,25 @@
+package ping
+
+import (
+	"context"
+
+	pb "{{ module_path }}/internal/pb/{{ module_path }}/api/{{ service_name }}"
+	"{{ module_path }}/internal/pkg/model"
+)
+
+func (i *Implementation) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
+	var forceError string
+	if req != nil {
+		forceError = req.GetForceError()
+	}
+
+	resp, err := i.pingService.Ping(ctx, model.PingRequest{ForceError: forceError})
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.PingResponse{
+		Status:  resp.Status,
+		Service: resp.Service,
+	}, nil
+}

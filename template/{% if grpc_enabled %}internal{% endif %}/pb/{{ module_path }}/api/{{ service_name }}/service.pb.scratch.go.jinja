@@ -1,0 +1,91 @@
+package {{ service_name | replace('-', '_') }}pb
+
+import (
+	context "context"
+	_ "embed"
+
+	runtime "github.com/grpc-ecosystem/grpc-gateway/v2/runtime"
+	grpc "google.golang.org/grpc"
+)
+
+//go:embed service.swagger.json
+var swaggerPingServiceJSON []byte
+
+// PingServiceServiceDesc is a descriptor for PingServiceServer.
+type PingServiceServiceDesc struct {
+	svc PingServiceServer
+	i   grpc.UnaryServerInterceptor
+}
+
+func NewPingServiceServiceDesc(i PingServiceServer) *PingServiceServiceDesc {
+	return &PingServiceServiceDesc{svc: i}
+}
+
+func (d *PingServiceServiceDesc) SwaggerDef() []byte {
+	return swaggerPingServiceJSON
+}
+
+func (d *PingServiceServiceDesc) RegisterGRPC(s *grpc.Server) {
+	RegisterPingServiceServer(s, d.svc)
+}
+
+func (d *PingServiceServiceDesc) RegisterGateway(ctx context.Context, mux *runtime.ServeMux) error {
+	if d.i == nil {
+		return RegisterPingServiceHandlerServer(ctx, mux, d.svc)
+	}
+
+	return RegisterPingServiceHandlerServer(ctx, mux, &proxyPingServiceServer{
+		PingServiceServer: d.svc,
+		interceptor:       d.i,
+	})
+}
+
+// WithHTTPUnaryInterceptor adds GRPC Server Interceptor for HTTP gateway requests.
+func (d *PingServiceServiceDesc) WithHTTPUnaryInterceptor(u grpc.UnaryServerInterceptor) {
+	if d.i == nil {
+		d.i = u
+	} else {
+		d.i = chainUnaryInterceptors(d.i, u)
+	}
+}
+
+type proxyPingServiceServer struct {
+	PingServiceServer
+	interceptor grpc.UnaryServerInterceptor
+}
+
+func (p *proxyPingServiceServer) Ping(ctx context.Context, req *PingRequest) (*PingResponse, error) {
+	ctx = runtime.NewServerMetadataContext(ctx, runtime.ServerMetadata{})
+
+	info := &grpc.UnaryServerInfo{
+		Server:     p.PingServiceServer,
+		FullMethod: "/{{ service_name | replace('-', '_') }}.PingService/Ping",
+	}
+
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return p.PingServiceServer.Ping(ctx, req.(*PingRequest))
+	}
+
+	resp, err := p.interceptor(ctx, req, info, handler)
+	if err != nil || resp == nil {
+		return nil, err
+	}
+
+	return resp.(*PingResponse), nil
+}
+
+func chainUnaryInterceptors(
+	first grpc.UnaryServerInterceptor,
+	second grpc.UnaryServerInterceptor,
+) grpc.UnaryServerInterceptor {
+	return func(
+		ctx context.Context,
+		req interface{},
+		info *grpc.UnaryServerInfo,
+		handler grpc.UnaryHandler,
+	) (interface{}, error) {
+		return first(ctx, req, info, func(ctx context.Context, req interface{}) (interface{}, error) {
+			return second(ctx, req, info, handler)
+		})
+	}
+}

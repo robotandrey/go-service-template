@@ -3,9 +3,28 @@ package ping
 import (
 	"context"
 
+{% if grpc_enabled %}
+	pb "{{ module_path }}/internal/pb/{{ module_path }}/api/{{ service_name }}"
+{% endif %}
 	"{{ module_path }}/internal/pkg/model"
 )
 
 type Service interface {
 	Ping(ctx context.Context, req model.PingRequest) (model.PingResponse, error)
 }
+
+{% if grpc_enabled %}
+type Implementation struct {
+	pb.UnimplementedPingServiceServer
+	pingService Service
+}
+
+func NewImplementation(pingService Service) *Implementation {
+	return &Implementation{pingService: pingService}
+}
+
+// GetDescription returns service descriptor from generated pb package.
+func (i *Implementation) GetDescription() *pb.PingServiceServiceDesc {
+	return pb.NewPingServiceServiceDesc(i)
+}
+{% endif %}

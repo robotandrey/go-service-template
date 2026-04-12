@@ -1,0 +1,187 @@
+# {{ service_name }}
+
+## English
+
+### Quick Start
+
+```bash
+make generate
+make mocks
+make run
+```
+
+Docs UI: [http://localhost:8081/docs](http://localhost:8081/docs)
+
+### Main Commands
+
+- `make generate` — generate proto/openapi artifacts
+- `make mocks` — generate mocks into `test/mock`
+- `make lint`
+- `make test`
+- `make build`
+- `make run`
+- `make format`
+- `make check`
+- `make deps`
+{% if docker_enabled or pg_enabled or kafka_enabled %}
+- `make up`
+- `make down`
+- `make logs`
+{% endif %}
+
+### Runtime
+
+Default ports:
+- public HTTP: `8080`
+{% if grpc_enabled %}
+- gRPC: `9090`
+{% endif %}
+- admin/docs HTTP: `8081`
+
+Docs/admin endpoints:
+- `GET /docs`
+- `GET /swagger.json`
+- `GET /openapi/swagger.json`
+
+{% if http_enabled %}
+HTTP endpoints:
+- `GET /healthz`
+- `GET /readyz`
+- `GET /v1/ping`
+
+{% endif %}
+{% if grpc_enabled %}
+gRPC API:
+- `PingService/Ping`
+
+Gateway path (for docs Try-it-out):
+- `POST /v1/ping`
+
+{% endif %}
+### Architecture
+
+- `cmd/{{ service_name }}` — composition root and lifecycle
+- `internal/app` — transport adapters and interceptors
+- `internal/pkg/model` — domain models and domain errors
+- `internal/pkg/service` — business logic
+- `internal/pkg/repository` — PostgreSQL adapters (when enabled)
+- `internal/pkg/infrastructure` — Kafka adapters
+- `internal/pb/{{ module_path }}/...` — generated proto/gateway/openapi files
+- `test/mock` — generated mocks
+
+### Error Handling
+
+Domain errors map to transport statuses via one shared mapper:
+- `ErrNotFound` -> gRPC `NotFound` / HTTP `404`
+- `ErrInvalidArgument` -> gRPC `InvalidArgument` / HTTP `400`
+
+When gRPC is enabled, interceptor adds `ErrorInfo.Reason` for known domain errors.
+
+### Configuration
+
+Load priority:
+- `ENV > YAML > defaults`
+
+Local examples:
+- `.deploy/config/.env.example`
+- `.deploy/config/config.local.yaml.example`
+
+### Docker
+
+Docker assets:
+- `.deploy/docker/Dockerfile`
+- `.deploy/docker/docker-compose.yml` (generated when Docker/PG/Kafka profile requires it)
+
+---
+
+## Русский
+
+### Быстрый старт
+
+```bash
+make generate
+make mocks
+make run
+```
+
+Docs UI: [http://localhost:8081/docs](http://localhost:8081/docs)
+
+### Основные команды
+
+- `make generate` — сгенерировать proto/openapi артефакты
+- `make mocks` — сгенерировать моки в `test/mock`
+- `make lint`
+- `make test`
+- `make build`
+- `make run`
+- `make format`
+- `make check`
+- `make deps`
+{% if docker_enabled or pg_enabled or kafka_enabled %}
+- `make up`
+- `make down`
+- `make logs`
+{% endif %}
+
+### Runtime
+
+Порты по умолчанию:
+- public HTTP: `8080`
+{% if grpc_enabled %}
+- gRPC: `9090`
+{% endif %}
+- admin/docs HTTP: `8081`
+
+Docs/admin endpoints:
+- `GET /docs`
+- `GET /swagger.json`
+- `GET /openapi/swagger.json`
+
+{% if http_enabled %}
+HTTP endpoints:
+- `GET /healthz`
+- `GET /readyz`
+- `GET /v1/ping`
+
+{% endif %}
+{% if grpc_enabled %}
+gRPC API:
+- `PingService/Ping`
+
+Gateway path (для Try-it-out из docs):
+- `POST /v1/ping`
+
+{% endif %}
+### Архитектура
+
+- `cmd/{{ service_name }}` — composition root и lifecycle
+- `internal/app` — transport adapters и interceptors
+- `internal/pkg/model` — доменные модели и доменные ошибки
+- `internal/pkg/service` — бизнес-логика
+- `internal/pkg/repository` — PostgreSQL-адаптеры (если включены)
+- `internal/pkg/infrastructure` — Kafka-адаптеры
+- `internal/pb/{{ module_path }}/...` — generated proto/gateway/openapi файлы
+- `test/mock` — generated моки
+
+### Обработка ошибок
+
+Доменные ошибки маппятся в транспортные статусы единым mapper:
+- `ErrNotFound` -> gRPC `NotFound` / HTTP `404`
+- `ErrInvalidArgument` -> gRPC `InvalidArgument` / HTTP `400`
+
+Если включен gRPC, interceptor добавляет `ErrorInfo.Reason` для известных доменных ошибок.
+
+### Конфигурация
+
+Приоритет загрузки:
+- `ENV > YAML > defaults`
+
+Локальные примеры:
+- `.deploy/config/.env.example`
+- `.deploy/config/config.local.yaml.example`
+
+### Docker
+
+Docker assets:
+- `.deploy/docker/Dockerfile`
+- `.deploy/docker/docker-compose.yml` (генерируется, если профиль включает Docker/PG/Kafka)

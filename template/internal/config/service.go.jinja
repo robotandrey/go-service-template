@@ -1,0 +1,6 @@
+package config
+
+type ServiceConfig struct {
+	Name       string `env:"SERVICE_NAME" yaml:"name"`
+	ModulePath string `env:"SERVICE_MODULE_PATH" yaml:"module_path"`
+}
