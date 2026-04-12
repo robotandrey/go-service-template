@@ -1,0 +1,69 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"{{ module_path }}/internal/config"
+{% if pg_enabled %}
+	"github.com/jackc/pgx/v5/pgxpool"
+{% endif %}
+)
+
+{% if pg_enabled %}
+type PostgresRepository struct {
+	pool *pgxpool.Pool
+}
+
+func NewPostgresRepository(ctx context.Context, cfg config.PostgresConfig) (*PostgresRepository, error) {
+	if !cfg.Enabled {
+		return nil, fmt.Errorf("postgres module is disabled in config")
+	}
+
+	poolCfg, err := pgxpool.ParseConfig(cfg.DSN)
+	if err != nil {
+		return nil, fmt.Errorf("parse pg dsn: %w", err)
+	}
+
+	poolCfg.MaxConns = cfg.MaxConns
+	poolCfg.MaxConnLifetime = cfg.ConnMaxLifetime
+
+	pool, err := pgxpool.NewWithConfig(ctx, poolCfg)
+	if err != nil {
+		return nil, fmt.Errorf("init pgx pool: %w", err)
+	}
+
+	return &PostgresRepository{pool: pool}, nil
+}
+
+func (r *PostgresRepository) Ping(ctx context.Context) error {
+	if r == nil || r.pool == nil {
+		return fmt.Errorf("postgres pool is not initialized")
+	}
+
+	return r.pool.Ping(ctx)
+}
+
+func (r *PostgresRepository) Close() error {
+	if r == nil || r.pool == nil {
+		return nil
+	}
+
+	r.pool.Close()
+	return nil
+}
+{% else %}
+type PostgresRepository struct{}
+
+func NewPostgresRepository(_ context.Context, _ config.PostgresConfig) (*PostgresRepository, error) {
+	return nil, fmt.Errorf("postgres module is disabled in this template build")
+}
+
+func (r *PostgresRepository) Ping(_ context.Context) error {
+	return fmt.Errorf("postgres module is disabled in this template build")
+}
+
+func (r *PostgresRepository) Close() error {
+	return nil
+}
+{% endif %}

@@ -1,0 +1,9 @@
+package main
+
+import "testing"
+
+func TestServiceNameNotEmpty(t *testing.T) {
+	if serviceName == "" {
+		t.Fatal("serviceName must not be empty")
+	}
+}

@@ -1,0 +1,22 @@
+package interceptor
+
+import (
+	"context"
+
+	"{{ module_path }}/internal/app/errorx"
+	"google.golang.org/grpc"
+)
+
+func ErrorHandlingInterceptor(
+	ctx context.Context,
+	req interface{},
+	_ *grpc.UnaryServerInfo,
+	handler grpc.UnaryHandler,
+) (interface{}, error) {
+	resp, err := handler(ctx, req)
+	if err != nil {
+		return nil, errorx.ToGRPCError(err)
+	}
+
+	return resp, nil
+}

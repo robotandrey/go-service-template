@@ -1,0 +1,228 @@
+package config
+
+import (
+	"errors"
+	"fmt"
+	"os"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/caarlos0/env/v11"
+	"github.com/go-playground/validator/v10"
+	"github.com/joho/godotenv"
+	"gopkg.in/yaml.v3"
+)
+
+type AppConfig struct {
+	Service       ServiceConfig       `yaml:"service" envPrefix:"SERVICE_"`
+	HTTP          HTTPConfig          `yaml:"http" envPrefix:"HTTP_"`
+	GRPC          GRPCConfig          `yaml:"grpc" envPrefix:"GRPC_"`
+	Postgres      PostgresConfig      `yaml:"postgres" envPrefix:"PG_"`
+	Kafka         KafkaConfig         `yaml:"kafka" envPrefix:"KAFKA_"`
+	Observability ObservabilityConfig `yaml:"observability" envPrefix:"OBSERVABILITY_"`
+	Dev           DevConfig           `yaml:"dev" envPrefix:"DEV_"`
+}
+
+type ServiceConfig struct {
+	Name       string `yaml:"name" env:"NAME"`
+	ModulePath string `yaml:"module_path" env:"MODULE_PATH"`
+}
+
+type HTTPConfig struct {
+	Enabled bool `yaml:"enabled" env:"ENABLED"`
+	Port    int  `yaml:"port" env:"PORT" validate:"min=1,max=65535"`
+}
+
+type GRPCConfig struct {
+	Enabled bool `yaml:"enabled" env:"ENABLED"`
+	Port    int  `yaml:"port" env:"PORT" validate:"min=1,max=65535"`
+}
+
+type PostgresConfig struct {
+	Enabled         bool          `yaml:"enabled" env:"ENABLED"`
+	DSN             string        `yaml:"dsn" env:"DSN"`
+	MaxConns        int32         `yaml:"max_conns" env:"MAX_CONNS"`
+	ConnMaxLifetime time.Duration `yaml:"conn_max_lifetime" env:"CONN_MAX_LIFETIME"`
+}
+
+type KafkaConfig struct {
+	Enabled         bool   `yaml:"enabled" env:"ENABLED"`
+	ProducerEnabled bool   `yaml:"producer_enabled" env:"PRODUCER_ENABLED"`
+	ConsumerEnabled bool   `yaml:"consumer_enabled" env:"CONSUMER_ENABLED"`
+	Brokers         string `yaml:"brokers" env:"BROKERS"`
+	ClientID        string `yaml:"client_id" env:"CLIENT_ID"`
+	TopicOut        string `yaml:"topic_out" env:"TOPIC_OUT"`
+	TopicIn         string `yaml:"topic_in" env:"TOPIC_IN"`
+	GroupID         string `yaml:"group_id" env:"GROUP_ID"`
+}
+
+type ObservabilityConfig struct {
+	LogLevel string `yaml:"log_level" env:"LOG_LEVEL"`
+}
+
+type DevConfig struct {
+	ConfigFile string `yaml:"config_file" env:"CONFIG_FILE"`
+	LoadDotEnv bool   `yaml:"load_dotenv" env:"LOAD_DOTENV"`
+}
+
+func MustLoad() AppConfig {
+	cfg, err := Load()
+	if err != nil {
+		panic(err)
+	}
+
+	return cfg
+}
+
+func Load() (AppConfig, error) {
+	cfg := defaultConfig()
+
+	if shouldLoadDotEnv() {
+		_ = godotenv.Load(".env.local", ".env")
+	}
+
+	if err := mergeYAML(&cfg); err != nil {
+		return AppConfig{}, err
+	}
+
+	if err := env.Parse(&cfg); err != nil {
+		return AppConfig{}, fmt.Errorf("parse env config: %w", err)
+	}
+
+	if err := cfg.Validate(); err != nil {
+		return AppConfig{}, err
+	}
+
+	return cfg, nil
+}
+
+func (c AppConfig) Validate() error {
+	if err := validator.New().Struct(c); err != nil {
+		return fmt.Errorf("validate config fields: %w", err)
+	}
+
+	if !c.HTTP.Enabled && !c.GRPC.Enabled {
+		return errors.New("at least one transport must be enabled: http or grpc")
+	}
+
+	if c.Postgres.Enabled && strings.TrimSpace(c.Postgres.DSN) == "" {
+		return errors.New("pg enabled but PG_DSN is empty")
+	}
+
+	if c.Kafka.Enabled {
+		if len(c.Kafka.BrokersList()) == 0 {
+			return errors.New("kafka enabled but KAFKA_BROKERS is empty")
+		}
+
+		if !c.Kafka.ProducerEnabled && !c.Kafka.ConsumerEnabled {
+			return errors.New("kafka enabled but both producer and consumer are disabled")
+		}
+
+		if c.Kafka.ProducerEnabled && strings.TrimSpace(c.Kafka.TopicOut) == "" {
+			return errors.New("kafka producer enabled but KAFKA_TOPIC_OUT is empty")
+		}
+
+		if c.Kafka.ConsumerEnabled {
+			if strings.TrimSpace(c.Kafka.TopicIn) == "" {
+				return errors.New("kafka consumer enabled but KAFKA_TOPIC_IN is empty")
+			}
+
+			if strings.TrimSpace(c.Kafka.GroupID) == "" {
+				return errors.New("kafka consumer enabled but KAFKA_GROUP_ID is empty")
+			}
+		}
+	}
+
+	return nil
+}
+
+func (c KafkaConfig) BrokersList() []string {
+	parts := strings.Split(c.Brokers, ",")
+	out := make([]string, 0, len(parts))
+
+	for _, part := range parts {
+		value := strings.TrimSpace(part)
+		if value != "" {
+			out = append(out, value)
+		}
+	}
+
+	return out
+}
+
+func mergeYAML(cfg *AppConfig) error {
+	path := strings.TrimSpace(os.Getenv("DEV_CONFIG_FILE"))
+	if path == "" {
+		path = strings.TrimSpace(cfg.Dev.ConfigFile)
+	}
+	if path == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return fmt.Errorf("read config file %q: %w", path, err)
+	}
+
+	if err := yaml.Unmarshal(data, cfg); err != nil {
+		return fmt.Errorf("decode config file %q: %w", path, err)
+	}
+
+	return nil
+}
+
+func defaultConfig() AppConfig {
+	return AppConfig{
+		Service: ServiceConfig{
+			Name:       "{{ service_name }}",
+			ModulePath: "{{ module_path }}",
+		},
+		HTTP: HTTPConfig{
+			Enabled: {{ "true" if http_enabled else "false" }},
+			Port:    80,
+		},
+		GRPC: GRPCConfig{
+			Enabled: {{ "true" if grpc_enabled else "false" }},
+			Port:    82,
+		},
+		Postgres: PostgresConfig{
+			Enabled:         false,
+			DSN:             "postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable",
+			MaxConns:        4,
+			ConnMaxLifetime: 30 * time.Minute,
+		},
+		Kafka: KafkaConfig{
+			Enabled:         false,
+			ProducerEnabled: false,
+			ConsumerEnabled: false,
+			Brokers:         "127.0.0.1:19092",
+			ClientID:        "{{ service_name }}",
+			TopicOut:        "{{ service_name }}.events.v1",
+			TopicIn:         "{{ service_name }}.events.v1",
+			GroupID:         "{{ service_name }}.group.v1",
+		},
+		Observability: ObservabilityConfig{LogLevel: "info"},
+		Dev: DevConfig{
+			ConfigFile: "config.local.yaml",
+			LoadDotEnv: true,
+		},
+	}
+}
+
+func shouldLoadDotEnv() bool {
+	value := strings.TrimSpace(os.Getenv("DEV_LOAD_DOTENV"))
+	if value == "" {
+		return true
+	}
+
+	enabled, err := strconv.ParseBool(value)
+	if err != nil {
+		return true
+	}
+
+	return enabled
+}

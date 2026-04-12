@@ -1,0 +1,51 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
+
+func TestValidateTransport(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.HTTP.Enabled = false
+	cfg.GRPC.Enabled = false
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected transport validation error")
+	}
+}
+
+func TestValidateKafkaModes(t *testing.T) {
+	cfg := defaultConfig()
+	cfg.Kafka.Enabled = true
+	cfg.Kafka.ProducerEnabled = false
+	cfg.Kafka.ConsumerEnabled = false
+
+	if err := cfg.Validate(); err == nil {
+		t.Fatal("expected kafka mode validation error")
+	}
+}
+
+func TestPrecedenceEnvOverYAML(t *testing.T) {
+	t.Setenv("DEV_LOAD_DOTENV", "false")
+
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.local.yaml")
+	content := []byte("http:\n  port: 18080\n")
+	if err := os.WriteFile(cfgPath, content, 0o600); err != nil {
+		t.Fatalf("write yaml: %v", err)
+	}
+
+	t.Setenv("DEV_CONFIG_FILE", cfgPath)
+	t.Setenv("HTTP_PORT", "18181")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("load config: %v", err)
+	}
+
+	if cfg.HTTP.Port != 18181 {
+		t.Fatalf("expected env precedence for HTTP_PORT, got %d", cfg.HTTP.Port)
+	}
+}

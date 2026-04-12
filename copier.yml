@@ -1,0 +1,72 @@
+_templates_suffix: .jinja
+_subdirectory: template
+_envops:
+  trim_blocks: true
+  lstrip_blocks: true
+
+service_name:
+  type: str
+  help: "Service name (for example: users-api)"
+  validator: >-
+    {% if not service_name %}
+    service_name is required.
+    {% endif %}
+
+module_path:
+  type: str
+  help: "Go module path (for example: github.com/acme/users-api)"
+  validator: >-
+    {% if not module_path %}
+    module_path is required.
+    {% endif %}
+
+http_enabled:
+  type: bool
+  default: false
+  help: Enable HTTP transport?
+
+grpc_enabled:
+  type: bool
+  default: true
+  help: Enable gRPC transport?
+  validator: >-
+    {% if not (http_enabled or grpc_enabled) %}
+    At least one transport must be enabled: http_enabled or grpc_enabled.
+    {% endif %}
+
+pg_enabled:
+  type: bool
+  default: false
+  help: Enable PostgreSQL module?
+
+kafka_enabled:
+  type: bool
+  default: false
+  help: Enable Kafka module?
+
+kafka_producer_enabled:
+  type: bool
+  default: false
+  when: "{{ kafka_enabled == true }}"
+  help: Enable Kafka producer scaffold?
+
+kafka_consumer_enabled:
+  type: bool
+  default: false
+  when: "{{ kafka_enabled == true }}"
+  help: Enable Kafka consumer scaffold?
+  validator: >-
+    {% if kafka_enabled and not (kafka_producer_enabled or kafka_consumer_enabled) %}
+    At least one Kafka mode must be enabled: kafka_producer_enabled or kafka_consumer_enabled.
+    {% endif %}
+
+docker_enabled:
+  type: bool
+  default: false
+  help: Enable app service in docker-compose?
+
+_exclude:
+  - ".git"
+  - ".idea"
+  - "~*"
+  - ".DS_Store"

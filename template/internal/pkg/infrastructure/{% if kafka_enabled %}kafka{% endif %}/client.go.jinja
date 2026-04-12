@@ -1,0 +1,135 @@
+package kafka
+
+import (
+	"context"
+	"errors"
+{% if kafka_enabled %}
+	"fmt"
+{% endif %}
+{% if kafka_producer_enabled %}
+	"time"
+{% endif %}
+
+	"{{ module_path }}/internal/config"
+{% if kafka_enabled %}
+	"github.com/twmb/franz-go/pkg/kgo"
+{% endif %}
+)
+
+type Client struct {
+	enabled bool
+{% if kafka_enabled %}
+	cfg     config.KafkaConfig
+	client  *kgo.Client
+{% endif %}
+}
+
+func NewClient(cfg config.KafkaConfig) (*Client, error) {
+	if !cfg.Enabled {
+		return &Client{enabled: false}, nil
+	}
+
+{% if kafka_enabled %}
+	brokers := cfg.BrokersList()
+	if len(brokers) == 0 {
+		return nil, errors.New("kafka brokers list is empty")
+	}
+
+	opts := []kgo.Opt{
+		kgo.SeedBrokers(brokers...),
+		kgo.ClientID(cfg.ClientID),
+	}
+
+{% if kafka_consumer_enabled %}
+	if cfg.ConsumerEnabled {
+		opts = append(opts,
+			kgo.ConsumeTopics(cfg.TopicIn),
+			kgo.ConsumerGroup(cfg.GroupID),
+		)
+	}
+{% endif %}
+
+	client, err := kgo.NewClient(opts...)
+	if err != nil {
+		return nil, fmt.Errorf("create kafka client: %w", err)
+	}
+
+	return &Client{enabled: true, cfg: cfg, client: client}, nil
+{% else %}
+	return nil, errors.New("kafka module is disabled in this template build")
+{% endif %}
+}
+
+func (c *Client) Close() error {
+{% if kafka_enabled %}
+	if c == nil || c.client == nil {
+		return nil
+	}
+	c.client.Close()
+{% endif %}
+	return nil
+}
+
+{% if kafka_producer_enabled %}
+func (c *Client) PublishStartupEvent(ctx context.Context, serviceName string) error {
+{% if kafka_enabled %}
+	if c == nil || !c.enabled || !c.cfg.ProducerEnabled {
+		return nil
+	}
+
+	publishCtx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	err := c.client.ProduceSync(publishCtx, &kgo.Record{
+		Topic: c.cfg.TopicOut,
+		Value: []byte(fmt.Sprintf("%s started at %s", serviceName, time.Now().Format(time.RFC3339))),
+	}).FirstErr()
+	if err != nil {
+		return fmt.Errorf("produce kafka startup event: %w", err)
+	}
+{% endif %}
+
+	return nil
+}
+{% endif %}
+
+{% if kafka_consumer_enabled %}
+func (c *Client) StartConsumer(ctx context.Context, handler func([]byte)) <-chan error {
+	errCh := make(chan error, 1)
+
+{% if kafka_enabled %}
+	if c == nil || !c.enabled || !c.cfg.ConsumerEnabled {
+		close(errCh)
+		return errCh
+	}
+
+	go func() {
+		defer close(errCh)
+
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+
+			fetches := c.client.PollFetches(ctx)
+			if errs := fetches.Errors(); len(errs) > 0 {
+				errCh <- fmt.Errorf("poll kafka fetches: %w", errs[0].Err)
+				return
+			}
+
+			iter := fetches.RecordIter()
+			for !iter.Done() {
+				rec := iter.Next()
+				handler(rec.Value)
+			}
+		}
+	}()
+{% else %}
+	close(errCh)
+{% endif %}
+
+	return errCh
+}
+{% endif %}

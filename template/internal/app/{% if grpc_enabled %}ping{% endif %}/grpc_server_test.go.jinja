@@ -1,0 +1,69 @@
+package ping
+
+import (
+	"context"
+	"net"
+	"testing"
+	"time"
+
+	pb "{{ module_path }}/api/{{ service_name }}"
+	"{{ module_path }}/internal/pkg/model"
+	pingservice "{{ module_path }}/internal/pkg/service/ping"
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/status"
+)
+
+func TestGRPCServerForcedErrorMapped(t *testing.T) {
+	t.Parallel()
+
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+
+	server := NewGRPCServer(pingservice.New("svc"))
+	go func() {
+		_ = server.Serve(lis)
+	}()
+	t.Cleanup(func() {
+		server.Stop()
+		_ = lis.Close()
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+
+	conn, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("new grpc client: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.Close() })
+
+	client := pb.NewPingServiceClient(conn)
+	_, err = client.Ping(ctx, &pb.PingRequest{ForceError: model.ForceErrorNotFound})
+	if err == nil {
+		t.Fatal("expected grpc error")
+	}
+
+	st, ok := status.FromError(err)
+	if !ok {
+		t.Fatalf("expected grpc status: %v", err)
+	}
+	if st.Code() != codes.NotFound {
+		t.Fatalf("unexpected code: %s", st.Code())
+	}
+
+	reason := ""
+	for _, detail := range st.Details() {
+		if info, ok := detail.(*errdetails.ErrorInfo); ok {
+			reason = info.Reason
+			break
+		}
+	}
+	if reason != "NOT_FOUND" {
+		t.Fatalf("unexpected reason: %q", reason)
+	}
+}

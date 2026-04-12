@@ -1,0 +1,174 @@
+package main
+
+import (
+	"context"
+	"fmt"
+	"log/slog"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	appping "{{ module_path }}/internal/app/ping"
+	"{{ module_path }}/internal/config"
+	{% if kafka_enabled %}
+	"{{ module_path }}/internal/pkg/infrastructure/kafka"
+	{% endif %}
+	{% if pg_enabled %}
+	"{{ module_path }}/internal/pkg/repository"
+	{% endif %}
+	pingservice "{{ module_path }}/internal/pkg/service/ping"
+	{% if grpc_enabled %}
+	"net"
+	{% endif %}
+	{% if http_enabled %}
+	"net/http"
+	{% endif %}
+)
+
+const (
+	serviceName     = "{{ service_name }}"
+	shutdownTimeout = 10 * time.Second
+)
+
+func main() {
+	cfg := config.MustLoad()
+	logger := newLogger(cfg.Observability.LogLevel)
+	pingSvc := pingservice.New(serviceName)
+
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+
+	errCh := make(chan error, 4)
+	shutdownFns := make([]func(context.Context) error, 0, 4)
+{% if pg_enabled %}
+	if cfg.Postgres.Enabled {
+		repo, err := repository.NewPostgresRepository(ctx, cfg.Postgres)
+		if err != nil {
+			logger.Error("init postgres repository", slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		if err := repo.Ping(ctx); err != nil {
+			logger.Error("ping postgres", slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		shutdownFns = append(shutdownFns, func(_ context.Context) error {
+			return repo.Close()
+		})
+	}
+{% endif %}
+{% if kafka_enabled %}
+	if cfg.Kafka.Enabled {
+		kafkaClient, err := kafka.NewClient(cfg.Kafka)
+		if err != nil {
+			logger.Error("init kafka client", slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		shutdownFns = append(shutdownFns, func(_ context.Context) error {
+			return kafkaClient.Close()
+		})
+{% if kafka_producer_enabled %}
+		if cfg.Kafka.ProducerEnabled {
+			if err := kafkaClient.PublishStartupEvent(ctx, serviceName); err != nil {
+				logger.Warn("publish startup event", slog.Any("error", err))
+			}
+		}
+{% endif %}
+{% if kafka_consumer_enabled %}
+		if cfg.Kafka.ConsumerEnabled {
+			consumerErrCh := kafkaClient.StartConsumer(ctx, func(msg []byte) {
+				logger.Debug("consumed kafka message", slog.String("message", string(msg)))
+			})
+
+			go func() {
+				for consumerErr := range consumerErrCh {
+					errCh <- fmt.Errorf("kafka consumer: %w", consumerErr)
+				}
+			}()
+		}
+{% endif %}
+	}
+{% endif %}
+{% if http_enabled %}
+	if cfg.HTTP.Enabled {
+		httpServer := appping.NewHTTPServer(cfg.HTTP.Port, pingSvc)
+		shutdownFns = append(shutdownFns, httpServer.Shutdown)
+
+		go func() {
+			logger.Info("http server listening", slog.Int("port", cfg.HTTP.Port))
+			if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				errCh <- fmt.Errorf("http server: %w", err)
+			}
+		}()
+	}
+{% endif %}
+{% if grpc_enabled %}
+	if cfg.GRPC.Enabled {
+		lis, err := net.Listen("tcp", fmt.Sprintf(":%d", cfg.GRPC.Port))
+		if err != nil {
+			logger.Error("failed to listen on gRPC port", slog.Int("port", cfg.GRPC.Port), slog.Any("error", err))
+			os.Exit(1)
+		}
+
+		grpcServer := appping.NewGRPCServer(pingSvc)
+		shutdownFns = append(shutdownFns, func(shutdownCtx context.Context) error {
+			done := make(chan struct{})
+			go func() {
+				grpcServer.GracefulStop()
+				close(done)
+			}()
+
+			select {
+			case <-done:
+				return nil
+			case <-shutdownCtx.Done():
+				grpcServer.Stop()
+				return shutdownCtx.Err()
+			}
+		})
+
+		go func() {
+			logger.Info("grpc server listening", slog.Int("port", cfg.GRPC.Port))
+			if serveErr := grpcServer.Serve(lis); serveErr != nil {
+				errCh <- fmt.Errorf("grpc server: %w", serveErr)
+			}
+		}()
+	}
+{% endif %}
+	select {
+	case err := <-errCh:
+		logger.Error("server error", slog.Any("error", err))
+	case <-ctx.Done():
+		logger.Info("shutdown signal received")
+	}
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), shutdownTimeout)
+	defer cancel()
+
+	for _, shutdownFn := range shutdownFns {
+		if err := shutdownFn(shutdownCtx); err != nil {
+			logger.Warn("shutdown error", slog.Any("error", err))
+		}
+	}
+}
+
+func newLogger(levelRaw string) *slog.Logger {
+	level := slog.LevelInfo
+	switch strings.ToLower(strings.TrimSpace(levelRaw)) {
+	case "debug":
+		level = slog.LevelDebug
+	case "warn", "warning":
+		level = slog.LevelWarn
+	case "error":
+		level = slog.LevelError
+	case "", "info":
+		level = slog.LevelInfo
+	}
+
+	handler := slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: level})
+	return slog.New(handler)
+}

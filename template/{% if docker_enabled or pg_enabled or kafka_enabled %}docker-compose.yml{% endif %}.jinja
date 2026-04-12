@@ -1,0 +1,89 @@
+services:
+{% if docker_enabled %}
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      HTTP_ENABLED: {{ "true" if http_enabled else "false" }}
+      HTTP_PORT: 80
+      GRPC_ENABLED: {{ "true" if grpc_enabled else "false" }}
+      GRPC_PORT: 82
+      PG_ENABLED: {{ "true" if pg_enabled else "false" }}
+      KAFKA_ENABLED: {{ "true" if kafka_enabled else "false" }}
+      KAFKA_PRODUCER_ENABLED: {{ "true" if kafka_producer_enabled else "false" }}
+      KAFKA_CONSUMER_ENABLED: {{ "true" if kafka_consumer_enabled else "false" }}
+      KAFKA_BROKERS: redpanda:9092
+      PG_DSN: postgres://postgres:postgres@postgres:5432/postgres?sslmode=disable
+    ports:
+      - "8080:80"
+      - "8082:82"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "if [ \"$${HTTP_ENABLED}\" = \"true\" ]; then wget -qO- http://127.0.0.1:$${HTTP_PORT}/healthz >/dev/null; elif [ \"$${GRPC_ENABLED}\" = \"true\" ]; then nc -z 127.0.0.1 $${GRPC_PORT}; else exit 1; fi",
+        ]
+      interval: 10s
+      timeout: 3s
+      retries: 15
+{% if pg_enabled %}
+    depends_on:
+      postgres:
+        condition: service_healthy
+{% endif %}
+{% if kafka_enabled %}
+      redpanda:
+        condition: service_healthy
+{% endif %}
+{% endif %}
+
+{% if pg_enabled %}
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+      POSTGRES_DB: postgres
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d postgres"]
+      interval: 5s
+      timeout: 3s
+      retries: 15
+{% endif %}
+
+{% if kafka_enabled %}
+  redpanda:
+    image: docker.redpanda.com/redpandadata/redpanda:v24.1.9
+    command:
+      - redpanda
+      - start
+      - --overprovisioned
+      - --smp
+      - "1"
+      - --memory
+      - 512M
+      - --reserve-memory
+      - 0M
+      - --check=false
+      - --kafka-addr
+      - internal://0.0.0.0:9092,external://0.0.0.0:19092
+      - --advertise-kafka-addr
+      - internal://redpanda:9092,external://localhost:19092
+    ports:
+      - "19092:19092"
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -q 'Healthy: true'"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+{% endif %}
+
+{% if not (docker_enabled or pg_enabled or kafka_enabled) %}
+  noop:
+    image: alpine:3.20
+    command: ["sh", "-c", "echo no optional services enabled"]
+    profiles: ["disabled"]
+{% endif %}

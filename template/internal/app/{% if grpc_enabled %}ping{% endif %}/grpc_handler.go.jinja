@@ -1,0 +1,44 @@
+package ping
+
+import (
+	"context"
+
+	pb "{{ module_path }}/api/{{ service_name }}"
+	"{{ module_path }}/internal/app/interceptor"
+	"{{ module_path }}/internal/pkg/model"
+	"google.golang.org/grpc"
+)
+
+type GRPCHandler struct {
+	pb.UnimplementedPingServiceServer
+	pingService Service
+}
+
+func NewGRPCServer(pingService Service) *grpc.Server {
+	server := grpc.NewServer(
+		grpc.UnaryInterceptor(interceptor.ErrorHandlingInterceptor),
+	)
+	pb.RegisterPingServiceServer(server, NewGRPCHandler(pingService))
+	return server
+}
+
+func NewGRPCHandler(pingService Service) *GRPCHandler {
+	return &GRPCHandler{pingService: pingService}
+}
+
+func (h *GRPCHandler) Ping(ctx context.Context, req *pb.PingRequest) (*pb.PingResponse, error) {
+	var forceError string
+	if req != nil {
+		forceError = req.GetForceError()
+	}
+
+	resp, err := h.pingService.Ping(ctx, model.PingRequest{ForceError: forceError})
+	if err != nil {
+		return nil, err
+	}
+
+	return &pb.PingResponse{
+		Status:  resp.Status,
+		Service: resp.Service,
+	}, nil
+}

@@ -1,0 +1,17 @@
+package model
+
+const (
+	ForceErrorNotFound           = "not_found"
+	ForceErrorInvalidArgument    = "invalid_argument"
+	ForceErrorAlreadyExists      = "already_exists"
+	ForceErrorFailedPrecondition = "failed_precondition"
+)
+
+type PingRequest struct {
+	ForceError string
+}
+
+type PingResponse struct {
+	Status  string `json:"status"`
+	Service string `json:"service"`
+}

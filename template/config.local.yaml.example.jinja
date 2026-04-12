@@ -1,0 +1,40 @@
+service:
+  name: {{ service_name }}
+  module_path: {{ module_path }}
+
+http:
+  enabled: {{ "true" if http_enabled else "false" }}
+  port: 80
+
+grpc:
+  enabled: {{ "true" if grpc_enabled else "false" }}
+  port: 82
+
+{%- if pg_enabled %}
+
+postgres:
+  enabled: false
+  dsn: postgres://postgres:postgres@127.0.0.1:5432/postgres?sslmode=disable
+  max_conns: 4
+  conn_max_lifetime: 30m
+{%- endif %}
+
+{%- if kafka_enabled %}
+
+kafka:
+  enabled: false
+  producer_enabled: {{ "true" if kafka_producer_enabled else "false" }}
+  consumer_enabled: {{ "true" if kafka_consumer_enabled else "false" }}
+  brokers: 127.0.0.1:19092
+  client_id: {{ service_name }}
+  topic_out: {{ service_name }}.events.v1
+  topic_in: {{ service_name }}.events.v1
+  group_id: {{ service_name }}.group.v1
+{%- endif %}
+
+observability:
+  log_level: info
+
+dev:
+  config_file: config.local.yaml
+  load_dotenv: true

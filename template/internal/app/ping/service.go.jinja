@@ -1,0 +1,11 @@
+package ping
+
+import (
+	"context"
+
+	"{{ module_path }}/internal/pkg/model"
+)
+
+type Service interface {
+	Ping(ctx context.Context, req model.PingRequest) (model.PingResponse, error)
+}

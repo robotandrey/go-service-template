@@ -1,0 +1,69 @@
+package errorx
+
+import (
+	"errors"
+	"net/http"
+	"testing"
+
+	"{{ module_path }}/internal/pkg/model"
+)
+
+func TestReasonFromError(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name           string
+		inErr          error
+		expectedReason string
+		expectedKnown  bool
+	}{
+		{name: "not found", inErr: model.ErrNotFound, expectedReason: ReasonNotFound, expectedKnown: true},
+		{name: "invalid argument", inErr: model.ErrInvalidArgument, expectedReason: ReasonInvalidArgument, expectedKnown: true},
+		{name: "unique violation", inErr: model.ErrUniqueViolation, expectedReason: ReasonUniqueViolation, expectedKnown: true},
+		{name: "revision mismatch", inErr: model.ErrRevisionMismatch, expectedReason: ReasonRevisionMismatch, expectedKnown: true},
+		{name: "unknown", inErr: errors.New("unknown"), expectedReason: "", expectedKnown: false},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			reason, known := ReasonFromError(tc.inErr)
+			if known != tc.expectedKnown {
+				t.Fatalf("unexpected known flag: got %v want %v", known, tc.expectedKnown)
+			}
+			if reason != tc.expectedReason {
+				t.Fatalf("unexpected reason: got %q want %q", reason, tc.expectedReason)
+			}
+		})
+	}
+}
+
+func TestHTTPStatusFromError(t *testing.T) {
+	t.Parallel()
+
+	testCases := []struct {
+		name           string
+		inErr          error
+		expectedStatus int
+	}{
+		{name: "not found", inErr: model.ErrNotFound, expectedStatus: http.StatusNotFound},
+		{name: "invalid argument", inErr: model.ErrInvalidArgument, expectedStatus: http.StatusBadRequest},
+		{name: "unique violation", inErr: model.ErrUniqueViolation, expectedStatus: http.StatusConflict},
+		{name: "revision mismatch", inErr: model.ErrRevisionMismatch, expectedStatus: http.StatusPreconditionFailed},
+		{name: "unknown", inErr: errors.New("unknown"), expectedStatus: http.StatusInternalServerError},
+	}
+
+	for _, tc := range testCases {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			status := HTTPStatusFromError(tc.inErr)
+			if status != tc.expectedStatus {
+				t.Fatalf("unexpected status: got %d want %d", status, tc.expectedStatus)
+			}
+		})
+	}
+}

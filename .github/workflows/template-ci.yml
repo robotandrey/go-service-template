@@ -1,0 +1,79 @@
+name: template-ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  scaffold-matrix:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: grpc-only
+            target_dir: ./_generated/grpc
+            service_name: grpc-svc
+            module_path: example.com/grpc-svc
+            http_enabled: "false"
+            grpc_enabled: "true"
+            extra_flags: ""
+          - profile: http-only
+            target_dir: ./_generated/http
+            service_name: http-svc
+            module_path: example.com/http-svc
+            http_enabled: "true"
+            grpc_enabled: "false"
+            extra_flags: ""
+          - profile: dual
+            target_dir: ./_generated/dual
+            service_name: dual-svc
+            module_path: example.com/dual-svc
+            http_enabled: "true"
+            grpc_enabled: "true"
+            extra_flags: ""
+          - profile: full
+            target_dir: ./_generated/full
+            service_name: full-svc
+            module_path: example.com/full-svc
+            http_enabled: "true"
+            grpc_enabled: "true"
+            extra_flags: "PG_ENABLED=true KAFKA_ENABLED=true KAFKA_PRODUCER_ENABLED=true KAFKA_CONSUMER_ENABLED=true DOCKER_ENABLED=true"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.23.x'
+
+      - name: Install copier
+        run: pipx install copier
+
+      - name: Generate profile
+        run: |
+          make service \
+            TARGET_DIR=${{ matrix.target_dir }} \
+            SERVICE_NAME=${{ matrix.service_name }} \
+            MODULE_PATH=${{ matrix.module_path }} \
+            HTTP_ENABLED=${{ matrix.http_enabled }} \
+            GRPC_ENABLED=${{ matrix.grpc_enabled }} \
+            ${{ matrix.extra_flags }}
+
+      - name: Build checks
+        run: |
+          cd ${{ matrix.target_dir }}
+          make generate
+          make lint
+          make test
+          make build
+
+      - name: Validate compose config when present
+        run: |
+          cd ${{ matrix.target_dir }}
+          if [ -f docker-compose.yml ]; then
+            docker compose config >/dev/null
+          fi

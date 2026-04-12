@@ -1,0 +1,18 @@
+syntax = "proto3";
+
+package {{ service_name | replace('-', '_') }};
+
+option go_package = "{{ module_path }}/api/{{ service_name }};{{ service_name | replace('-', '_') }}pb";
+
+service PingService {
+  rpc Ping(PingRequest) returns (PingResponse) {}
+}
+
+message PingRequest {
+  string force_error = 1;
+}
+
+message PingResponse {
+  string status = 1;
+  string service = 2;
+}

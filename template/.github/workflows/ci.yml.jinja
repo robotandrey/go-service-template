@@ -1,0 +1,45 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Cache local tools
+        uses: actions/cache@v4
+        with:
+          path: |
+            bin
+          key: {% raw %}${{ runner.os }}-tools-${{ hashFiles('default.mk') }}{% endraw %}
+
+      - name: Generate
+        run: make generate
+
+      - name: Lint
+        run: make lint
+
+      - name: Test
+        run: make test
+
+      - name: Build
+        run: make build
+
+      - name: Validate compose config (optional)
+        run: |
+          if [ -f docker-compose.yml ]; then
+            docker compose config >/dev/null
+          fi

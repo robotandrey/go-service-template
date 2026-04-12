@@ -1,0 +1,39 @@
+package errorx
+
+import (
+	"google.golang.org/genproto/googleapis/rpc/errdetails"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+	"google.golang.org/protobuf/protoadapt"
+)
+
+func ToGRPCError(err error) error {
+	reason, ok := ReasonFromError(err)
+	if !ok {
+		return err
+	}
+
+	st := status.New(grpcCodeFromReason(reason), err.Error())
+	info := &errdetails.ErrorInfo{Reason: reason}
+
+	if withDetails, detailErr := st.WithDetails(protoadapt.MessageV1Of(info)); detailErr == nil {
+		st = withDetails
+	}
+
+	return st.Err()
+}
+
+func grpcCodeFromReason(reason string) codes.Code {
+	switch reason {
+	case ReasonNotFound:
+		return codes.NotFound
+	case ReasonInvalidArgument:
+		return codes.InvalidArgument
+	case ReasonUniqueViolation:
+		return codes.AlreadyExists
+	case ReasonRevisionMismatch:
+		return codes.FailedPrecondition
+	default:
+		return codes.Internal
+	}
+}
