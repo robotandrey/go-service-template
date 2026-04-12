@@ -87,7 +87,7 @@ Generated service follows this base structure:
 - `internal/pkg/util` — helpers and test utilities
 
 Default vertical slice example is `ping` (`model -> service -> app`).
-When gRPC is enabled, generated service includes unary error interceptor (Saturn-Lite mapping with optional `ErrorInfo.Reason`).
+When gRPC is enabled, generated service includes unary error interceptor.
 When HTTP is enabled, generated service exposes `GET /healthz`, `GET /readyz`, `GET /v1/ping`.
 
 ### Generated Service Commands
@@ -206,7 +206,7 @@ make run
 - `internal/pkg/util` — helpers/test utilities
 
 Эталонный вертикальный срез по умолчанию: `ping` (`model -> service -> app`).
-Если включен gRPC, в сервисе по умолчанию подключается unary error-interceptor (Saturn-Lite маппинг + optional `ErrorInfo.Reason`).
+Если включен gRPC, в сервисе по умолчанию подключается unary error-interceptor.
 Если включен HTTP, сервис по умолчанию поднимает `GET /healthz`, `GET /readyz`, `GET /v1/ping`.
 
 ### Команды сгенерированного сервиса
